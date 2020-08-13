@@ -28,7 +28,6 @@ package org.jenkinsci.plugins.pipeline.modeldefinition.when.impl;
 import hudson.Extension;
 import hudson.util.ListBoxModel;
 import org.apache.commons.lang.StringUtils;
-import org.apache.tools.ant.types.selectors.SelectorUtils;
 import org.codehaus.groovy.ast.expr.Expression;
 import org.jenkinsci.Symbol;
 import org.jenkinsci.plugins.pipeline.modeldefinition.ast.ModelASTWhenContent;
@@ -39,8 +38,7 @@ import org.jenkinsci.plugins.pipeline.modeldefinition.when.utils.Comparator;
 import org.kohsuke.stapler.DataBoundConstructor;
 import org.kohsuke.stapler.DataBoundSetter;
 
-import javax.annotation.CheckForNull;
-import java.io.File;
+import edu.umd.cs.findbugs.annotations.CheckForNull;
 
 public class TagConditional extends DeclarativeStageConditional<TagConditional> {
     private final String pattern;

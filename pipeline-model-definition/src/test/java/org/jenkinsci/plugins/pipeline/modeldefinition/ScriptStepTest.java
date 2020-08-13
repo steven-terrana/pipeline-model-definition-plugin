@@ -37,7 +37,7 @@ public class ScriptStepTest extends AbstractModelDefTest {
     @BeforeClass
     public static void setUpAgent() throws Exception {
         s = j.createOnlineSlave();
-        s.setLabelString("some-label docker");
+        s.setLabelString("some-label");
     }
 
     @Test
@@ -48,21 +48,12 @@ public class ScriptStepTest extends AbstractModelDefTest {
     }
 
     @Test
-    public void dockerGlobalVariableInScript() throws Exception {
-        assumeDocker();
-
-        expect("dockerGlobalVariableInScript")
-                .logContains("[Pipeline] { (foo)", "image: ubuntu")
-                .go();
-    }
-
-    @Test
     public void globalLibrarySuccessInScript() throws Exception {
 
         initGlobalLibrary();
 
         // Test the successful, albeit limited, case.
-        expect("globalLibrarySuccessInScript")
+        expect("libraries/globalLibrarySuccessInScript")
                 .logContains("Hello Pipeline",
                         "[seed-set-get]",
                         "[nothing here]",

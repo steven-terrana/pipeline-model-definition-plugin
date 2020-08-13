@@ -1,16 +1,15 @@
 package org.jenkinsci.plugins.pipeline.modeldefinition.ast;
 
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import net.sf.json.JSONArray;
 import net.sf.json.JSONObject;
 import org.jenkinsci.plugins.pipeline.modeldefinition.validator.ModelValidator;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
 
-import javax.annotation.Nonnull;
+import edu.umd.cs.findbugs.annotations.NonNull;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 
 /**
  * A representation of a method call, including its name and a list of {@link ModelASTMethodArg}s.
@@ -44,35 +43,25 @@ public class ModelASTMethodCall extends ModelASTElement implements ModelASTMetho
     }
 
     @Override
+    @NonNull
     public JSONObject toJSON() {
-        final JSONArray a = new JSONArray();
-        for (ModelASTMethodArg arg: args) {
-            a.add(arg.toJSON());
-        }
-        return new JSONObject().accumulate("name", name).accumulate("arguments", a);
+        return new JSONObject()
+                .accumulate("name", name)
+                .accumulate("arguments", toJSONArray(args));
     }
 
     @Override
-    public void validate(@Nonnull final ModelValidator validator) {
+    public void validate(@NonNull final ModelValidator validator) {
         validator.validateElement(this);
-        for (ModelASTMethodArg arg : args) {
-            arg.validate(validator);
-        }
+        validate(validator, args);
     }
 
     @Override
+    @NonNull
     public String toGroovy() {
         StringBuilder result = new StringBuilder(name);
         result.append('(');
-        boolean first = true;
-        for (ModelASTMethodArg arg : args) {
-            if (first) {
-                first = false;
-            } else {
-                result.append(", ");
-            }
-            result.append(arg.toGroovy());
-        }
+        result.append(toGroovyArgList(args));
         result.append(')');
         return result.toString();
     }
@@ -80,9 +69,7 @@ public class ModelASTMethodCall extends ModelASTElement implements ModelASTMetho
     @Override
     public void removeSourceLocation() {
         super.removeSourceLocation();
-        for (ModelASTMethodArg arg : args) {
-            arg.removeSourceLocation();
-        }
+        removeSourceLocationsFrom(args);
     }
 
     public String getName() {

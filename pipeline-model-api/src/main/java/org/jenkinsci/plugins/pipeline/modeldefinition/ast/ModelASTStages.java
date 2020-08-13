@@ -1,20 +1,19 @@
 package org.jenkinsci.plugins.pipeline.modeldefinition.ast;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.UUID;
-
 import net.sf.json.JSONArray;
 import org.jenkinsci.plugins.pipeline.modeldefinition.validator.ModelValidator;
 
-import javax.annotation.Nonnull;
+import edu.umd.cs.findbugs.annotations.NonNull;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.UUID;
 
 /**
  * Represents the collection of {@code Stage}s to be executed in the build. Corresponds to {@code Stages}.
  *
  * @author Andrew Bayer
  */
-public final class ModelASTStages extends ModelASTElement {
+public class ModelASTStages extends ModelASTElement {
     private List<ModelASTStage> stages = new ArrayList<>();
     private final UUID uuid;
 
@@ -24,41 +23,33 @@ public final class ModelASTStages extends ModelASTElement {
     }
 
     @Override
-    public JSONArray toJSON() {
-        final JSONArray a = new JSONArray();
-        for (ModelASTStage stage: stages) {
-            a.add(stage.toJSON());
-        }
-        return a;
+    @NonNull
+    public Object toJSON() {
+        return toJSONArray(stages);
     }
 
     @Override
-    public void validate(@Nonnull final ModelValidator validator) {
+    public void validate(@NonNull final ModelValidator validator) {
         validate(validator, false);
     }
 
-    public void validate(final ModelValidator validator, boolean isNested) {
+    public void validate(final ModelValidator validator, boolean isWithinParallel) {
         validator.validateElement(this);
         for (ModelASTStage stage : stages) {
-            stage.validate(validator, isNested);
+            stage.validate(validator, isWithinParallel);
         }
     }
 
     @Override
+    @NonNull
     public String toGroovy() {
-        StringBuilder result = new StringBuilder();
-        for (ModelASTStage stage: stages) {
-            result.append(stage.toGroovy());
-        }
-        return result.toString();
+        return toGroovyBlock("stages", stages);
     }
 
     @Override
     public void removeSourceLocation() {
         super.removeSourceLocation();
-        for (ModelASTStage stage : stages) {
-            stage.removeSourceLocation();
-        }
+        removeSourceLocationsFrom(stages);
     }
 
     public UUID getUuid() {

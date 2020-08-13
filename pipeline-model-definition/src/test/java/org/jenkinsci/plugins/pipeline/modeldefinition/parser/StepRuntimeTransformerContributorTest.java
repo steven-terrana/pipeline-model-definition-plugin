@@ -24,20 +24,13 @@
 
 package org.jenkinsci.plugins.pipeline.modeldefinition.parser;
 
-import org.codehaus.groovy.ast.expr.ArgumentListExpression;
-import org.codehaus.groovy.ast.expr.ConstantExpression;
-import org.codehaus.groovy.ast.expr.Expression;
-import org.codehaus.groovy.ast.expr.MapEntryExpression;
-import org.codehaus.groovy.ast.expr.MapExpression;
-import org.codehaus.groovy.ast.expr.MethodCallExpression;
-import org.codehaus.groovy.ast.expr.TupleExpression;
+import org.codehaus.groovy.ast.expr.*;
 import org.jenkinsci.plugins.pipeline.modeldefinition.AbstractModelDefTest;
-import org.jenkinsci.plugins.pipeline.modeldefinition.SyntheticStageNames;
 import org.jenkinsci.plugins.pipeline.modeldefinition.ast.ModelASTStep;
 import org.junit.Test;
 import org.jvnet.hudson.test.TestExtension;
 
-import javax.annotation.Nonnull;
+import edu.umd.cs.findbugs.annotations.NonNull;
 
 import static org.codehaus.groovy.ast.tools.GeneralUtils.constX;
 
@@ -52,7 +45,7 @@ public class StepRuntimeTransformerContributorTest extends AbstractModelDefTest 
 
     @Test
     public void nestedTransform() throws Exception {
-        expect("nestedTreeSteps")
+        expect("steps/nestedTreeSteps")
                 .logContains("HELLO", "Timeout set to expire in 10 sec")
                 .go();
     }
@@ -71,8 +64,8 @@ public class StepRuntimeTransformerContributorTest extends AbstractModelDefTest 
     @TestExtension
     public static class EchoTransformer extends StepRuntimeTransformerContributor {
         @Override
-        @Nonnull
-        public MethodCallExpression transformStep(@Nonnull ModelASTStep step, @Nonnull MethodCallExpression methodCall) {
+        @NonNull
+        public MethodCallExpression transformStep(@NonNull ModelASTStep step, @NonNull MethodCallExpression methodCall) {
             if (step.getName().equals("echo")) {
                 ArgumentListExpression newArgs = new ArgumentListExpression();
                 TupleExpression oldArgs = (TupleExpression)methodCall.getArguments();
@@ -93,8 +86,8 @@ public class StepRuntimeTransformerContributorTest extends AbstractModelDefTest 
     @TestExtension
     public static class TimeoutTransformer extends StepRuntimeTransformerContributor {
         @Override
-        @Nonnull
-        public MethodCallExpression transformStep(@Nonnull ModelASTStep step, @Nonnull MethodCallExpression methodCall) {
+        @NonNull
+        public MethodCallExpression transformStep(@NonNull ModelASTStep step, @NonNull MethodCallExpression methodCall) {
             if (step.getName().equals("timeout")) {
                 ArgumentListExpression newArgs = new ArgumentListExpression();
                 TupleExpression oldArgs = (TupleExpression)methodCall.getArguments();

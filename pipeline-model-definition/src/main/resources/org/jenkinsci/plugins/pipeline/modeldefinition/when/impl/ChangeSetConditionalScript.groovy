@@ -26,8 +26,6 @@
 package org.jenkinsci.plugins.pipeline.modeldefinition.when.impl
 
 import hudson.scm.ChangeLogSet
-import org.apache.tools.ant.DirectoryScanner
-import org.apache.tools.ant.types.selectors.SelectorUtils
 import org.jenkinsci.plugins.workflow.cps.CpsScript
 
 class ChangeSetConditionalScript extends AbstractChangelogConditionalScript<ChangeSetConditional> {
@@ -38,15 +36,7 @@ class ChangeSetConditionalScript extends AbstractChangelogConditionalScript<Chan
     }
 
     @Override
-    void initializeEval() {
-        glob = describable.glob.replace('\\', '/')
-    }
-
-    @Override
     boolean matches(ChangeLogSet.Entry change) {
-        return change.affectedPaths.any { String path ->
-            path = path.replace('\\', '/')
-            return SelectorUtils.matchPath(glob, path, describable.isCaseSensitive())
-        }
+        return describable.changeSetMatches(change, describable.pattern, describable.caseSensitive)
     }
 }

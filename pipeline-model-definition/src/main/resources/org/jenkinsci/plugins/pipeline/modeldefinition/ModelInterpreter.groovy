@@ -26,25 +26,26 @@ package org.jenkinsci.plugins.pipeline.modeldefinition
 import com.cloudbees.groovy.cps.NonCPS
 import com.cloudbees.groovy.cps.impl.CpsClosure
 import hudson.FilePath
+import hudson.Functions
 import hudson.Launcher
 import hudson.model.Result
 import org.jenkinsci.plugins.pipeline.StageStatus
-import org.jenkinsci.plugins.pipeline.modeldefinition.agent.AbstractDockerAgent
+import org.jenkinsci.plugins.pipeline.modeldefinition.Messages
 import org.jenkinsci.plugins.pipeline.modeldefinition.model.*
 import org.jenkinsci.plugins.pipeline.modeldefinition.options.DeclarativeOption
 import org.jenkinsci.plugins.pipeline.modeldefinition.steps.CredentialWrapper
 import org.jenkinsci.plugins.pipeline.modeldefinition.when.DeclarativeStageConditional
 import org.jenkinsci.plugins.workflow.cps.CpsScript
+import org.jenkinsci.plugins.workflow.job.WorkflowRun
 import org.jenkinsci.plugins.workflow.steps.MissingContextVariableException
 import org.jenkinsci.plugins.workflow.support.steps.build.RunWrapper
 
-import javax.annotation.CheckForNull
-import javax.annotation.Nonnull
-
-import static org.apache.commons.lang.exception.ExceptionUtils.getFullStackTrace
-
 /**
  * CPS-transformed code for actually performing the build.
+ *
+ * WARNING: Avoid using 3rd-party non-Jenkins dependencies (including annotations)
+ * in this code, because even if they work in tests, they may not be available at
+ * runtime due to class loading differences.
  *
  * @author Andrew Bayer
  */
@@ -76,13 +77,16 @@ class ModelInterpreter implements Serializable {
                     withCredentialsBlock(root.environment) {
                         withEnvBlock(root.getEnvVars(script)) {
                             inWrappers(root.options?.wrappers) {
+                                // Wipe out the error, since if we get here and it's not null, that means we're retrying
+                                // the whole pipeline and don't want firstError to be set.
+                                firstError = null
                                 toolsBlock(root.tools, root.agent, null) {
                                     firstError = evaluateSequentialStages(root, root.stages, firstError, null, restartedStage, null).call()
 
                                     // Execute post-build actions now that we've finished all parallel.
                                     try {
                                         postBuildRun = true
-                                        executePostBuild(root)
+                                        executePostBuild(root, firstError)
                                     } catch (Throwable e) {
                                         if (firstError == null) {
                                             firstError = e
@@ -108,7 +112,7 @@ class ModelInterpreter implements Serializable {
                 // If we hit an exception somewhere *before* we got to parallel, we still need to do post-build tasks.
                 if (!postBuildRun) {
                     try {
-                        executePostBuild(root)
+                        executePostBuild(root, firstError)
                     } catch (Throwable e) {
                         if (firstError == null) {
                             firstError = e
@@ -167,7 +171,6 @@ class ModelInterpreter implements Serializable {
                     try {
                         evaluateStage(root, thisStage.agent ?: root.agent, thisStage, firstError, parent, skippedReason).call()
                     } catch (Throwable e) {
-                        script.getProperty("currentBuild").result = Utils.getResultFromException(e)
                         Utils.markStageFailedAndContinued(thisStage.name)
                         if (firstError == null) {
                             firstError = e
@@ -182,7 +185,7 @@ class ModelInterpreter implements Serializable {
                 if (skippedReason == null && parent != null &&
                     root.hasSatisfiedConditions(parent.post, script.getProperty("currentBuild"), parent, firstError)) {
                     Utils.logToTaskListener("Post stage")
-                    firstError = runPostConditions(parent.post, parent.agent ?: root.agent, firstError, parent.name, parent)
+                    firstError = runPostConditions(parent.post, parent.agent ?: root.agent, firstError, parent.name)
                 }
             }
 
@@ -202,7 +205,7 @@ class ModelInterpreter implements Serializable {
      */
     def getParallelStages(Root root, Agent parentAgent, Stage thisStage, Throwable firstError, SkippedStageReason skippedReason) {
         def parallelStages = [:]
-        thisStage?.parallelContent?.each { content ->
+        thisStage?.parallel?.stages?.each { content ->
             if (skippedReason != null) {
                 parallelStages.put(content.name,
                     evaluateStage(root, parentAgent, content, firstError, thisStage, skippedReason.cloneWithNewStage(content.name)))
@@ -211,8 +214,8 @@ class ModelInterpreter implements Serializable {
                     evaluateStage(root, thisStage.agent ?: parentAgent, content, firstError, thisStage, null))
             }
         }
-        if (!parallelStages.isEmpty() && thisStage.failFast) {
-            parallelStages.put("failFast", thisStage.failFast)
+        if (!parallelStages.isEmpty() && ( thisStage.failFast || root.options?.options?.get("parallelsAlwaysFailFast") != null) ) {
+            parallelStages.put("failFast", true)
         }
 
         return parallelStages
@@ -234,8 +237,6 @@ class ModelInterpreter implements Serializable {
     def evaluateStage(Root root, Agent parentAgent, Stage thisStage, Throwable firstError, Stage parent,
                       SkippedStageReason skippedReason) {
         return {
-            def thisError = null
-
             script.stage(thisStage.name) {
                 try {
                     if (skippedReason != null) {
@@ -247,82 +248,74 @@ class ModelInterpreter implements Serializable {
                         skippedReason = new SkippedStageReason.Unstable(thisStage.name)
                         skipStage(root, parentAgent, thisStage, firstError, skippedReason, parent).call()
                     } else {
-                        inWrappers(thisStage.options?.wrappers) {
-                            if (thisStage?.parallelContent) {
-                                stageInput(thisStage.input) {
-                                    if (evaluateWhen(thisStage.when)) {
-                                        withCredentialsBlock(thisStage.environment) {
-                                            withEnvBlock(thisStage.getEnvVars(script)) {
-                                                script.parallel(getParallelStages(root, parentAgent, thisStage, firstError, null))
-                                            }
-                                        }
-                                    } else {
-                                        skippedReason = new SkippedStageReason.When(thisStage.name)
-                                        skipStage(root, parentAgent, thisStage, firstError, skippedReason, parent).call()
-                                    }
-                                }
-                            } else {
-                                stageInput(thisStage.input) {
-                                    def stageBody = {
-                                        withCredentialsBlock(thisStage.environment) {
-                                            withEnvBlock(thisStage.getEnvVars(script)) {
-                                                toolsBlock(thisStage.tools, thisStage.agent ?: root.agent, parent?.tools ?: root.tools) {
-                                                    if (thisStage?.stages) {
-                                                        def nestedError = evaluateSequentialStages(root, thisStage.stages, firstError, thisStage, null, null).call()
+                        // if this a is a matrix generated stage, evaluate the matrix axis values first
+                        // These are literals that guaranteed not to depend on other variables
+                        // Users will expect them to be available at all times in a particular cell in a matrix.
+                        withEnvBlock(thisStage.getMatrixCellEnvVars(script)) {
 
-                                                        // Propagate any possible error from the sequential stages as if it were an error thrown directly.
-                                                        if (nestedError != null) {
-                                                            throw nestedError
+                            def whenEvaluator = new WhenEvaluator(thisStage.when)
+
+                            if (whenEvaluator.passedOrNotEvaluatedBeforeOptions()) {
+                                inWrappers(thisStage.options?.wrappers) {
+                                    if (whenEvaluator.passedOrNotEvaluatedBeforeInput()) {
+                                        stageInput(thisStage.input) {
+                                            if (thisStage?.parallel != null) {
+                                                if (whenEvaluator.passedOrNotEvaluated()) {
+                                                    withCredentialsBlock(thisStage.environment) {
+                                                        withEnvBlock(thisStage.getEnvVars(script)) {
+                                                            script.parallel(getParallelStages(root, parentAgent, thisStage, firstError, null))
                                                         }
-                                                    } else {
-                                                        // Execute the actual stage and potential post-stage actions
-                                                        executeSingleStage(root, thisStage, parentAgent)
+                                                    }
+                                                }
+                                            } else {
+                                                if (whenEvaluator.passedOrNotEvaluatedBeforeAgent()) {
+                                                    inDeclarativeAgent(thisStage, root, thisStage.agent) {
+                                                        if (whenEvaluator.passedOrNotEvaluated()) {
+                                                            withCredentialsBlock(thisStage.environment) {
+                                                                withEnvBlock(thisStage.getEnvVars(script)) {
+                                                                    toolsBlock(thisStage.tools, thisStage.agent ?: root.agent, parent?.tools ?: root.tools) {
+                                                                        if (thisStage?.stages) {
+                                                                            def nestedError = evaluateSequentialStages(root, thisStage.stages, firstError,
+                                                                                                                       thisStage, null, null).call()
+
+                                                                            // Propagate any possible error from the sequential stages
+                                                                            // as if it were an error thrown directly.
+                                                                            if (nestedError != null) {
+                                                                                throw nestedError
+                                                                            }
+                                                                        } else {
+                                                                            // Execute the actual stage and potential post-stage actions
+                                                                            executeSingleStage(root, thisStage, parentAgent)
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
                                                     }
                                                 }
                                             }
                                         }
                                     }
-
-                                    // If beforeAgent is true, evaluate the when before entering the agent.
-                                    boolean whenPassed = false
-                                    if (thisStage.when?.beforeAgent != null && thisStage.when?.beforeAgent) {
-                                        whenPassed = evaluateWhen(thisStage.when)
-                                        if (whenPassed) {
-                                            inDeclarativeAgent(thisStage, root, thisStage.agent) {
-                                                stageBody.call()
-                                            }
-                                        }
-                                    } else {
-                                        inDeclarativeAgent(thisStage, root, thisStage.agent) {
-                                            whenPassed = evaluateWhen(thisStage.when)
-                                            if (whenPassed) {
-                                                stageBody.call()
-                                            }
-                                        }
-                                    }
-
-                                    if (!whenPassed) {
-                                        skippedReason = new SkippedStageReason.When(thisStage.name)
-                                        skipStage(root, parentAgent, thisStage, firstError, skippedReason, parent).call()
-                                    }
                                 }
+                            }
+                            if (!whenEvaluator.passed) {
+                                skippedReason = new SkippedStageReason.When(thisStage.name)
+                                skipStage(root, parentAgent, thisStage, firstError, skippedReason, parent).call()
                             }
                         }
                     }
                 } catch (Throwable e) {
-                    script.getProperty("currentBuild").result = Result.FAILURE
                     Utils.markStageFailedAndContinued(thisStage.name)
                     if (firstError == null) {
                         firstError = e
                     }
-                    thisError = e
                 } finally {
                     // And finally, run the post stage steps if this was a parallel parent.
                     if (skippedReason == null &&
                         root.hasSatisfiedConditions(thisStage.post, script.getProperty("currentBuild"), thisStage, firstError) &&
-                        thisStage?.parallelContent) {
+                            thisStage?.parallel != null) {
                         Utils.logToTaskListener("Post stage")
-                        firstError = runPostConditions(thisStage.post, thisStage.agent ?: parentAgent, firstError, thisStage.name, thisStage)
+                        firstError = runPostConditions(thisStage.post, thisStage.agent ?: parentAgent, firstError, thisStage.name)
                     }
                 }
 
@@ -370,8 +363,8 @@ class ModelInterpreter implements Serializable {
         return {
             Utils.logToTaskListener(reason.message)
             Utils.markStageWithTag(thisStage.name, StageStatus.TAG_NAME, reason.stageStatus)
-            if (thisStage?.parallelContent) {
-                Map<String,Closure> parallelToSkip = getParallelStages(root, parentAgent, thisStage, firstError, reason)
+            if (thisStage?.parallel != null) {
+                Map<String, Closure> parallelToSkip = getParallelStages(root, parentAgent, thisStage, firstError, reason)
                 script.parallel(parallelToSkip)
                 if (reason instanceof SkippedStageReason.Restart) {
                     parallelToSkip.keySet().each { k -> Utils.markStartAndEndNodesInStageAsNotExecuted(k) }
@@ -434,8 +427,12 @@ class ModelInterpreter implements Serializable {
     def withEnvBlock(Map<String,Closure> envVars, Closure body) {
         if (envVars != null && !envVars.isEmpty()) {
             List<String> evaledEnv = envVars.collect { k, v ->
-                "${k}=${v.call()}"
-            }
+                try{
+                    "${k}=${v.call()}"
+                }catch (NullPointerException e) {
+                    throw new IllegalArgumentException( Messages.ModelInterpreter_EnvironmentVariableFailed(k) )
+                }
+            }.findAll { it != null}
             return {
                 script.withEnv(evaledEnv) {
                     body.call()
@@ -455,9 +452,9 @@ class ModelInterpreter implements Serializable {
      * @param body The closure to execute
      * @return The return of the resulting executed closure
      */
-    def withCredentialsBlock(@CheckForNull Environment environment, Closure body) {
+    def withCredentialsBlock(Environment environment, Closure body) {
         Map<String,CredentialWrapper> creds = new HashMap<>()
-        
+
         if (environment != null) {
             try {
                 RunWrapper currentBuild = (RunWrapper)script.getProperty("currentBuild")
@@ -493,7 +490,7 @@ class ModelInterpreter implements Serializable {
      */
     @NonCPS
     private List<Map<String, Object>> createWithCredentialsParameters(
-            @Nonnull Map<String, CredentialWrapper> credentials) {
+            Map<String, CredentialWrapper> credentials) {
         List<Map<String, Object>> parameters = []
         credentials.each { k, v ->
             v.addParameters(k, parameters)
@@ -555,7 +552,7 @@ class ModelInterpreter implements Serializable {
         toolsList.each { l ->
             String k = l.get(0)
             Closure v = (Closure)l.get(1)
-            String toolVer = v.call()
+            String toolVer = delegateAndExecute(v)
 
             script.tool(name: toolVer, type: Tools.typeForKey(k))
 
@@ -575,10 +572,14 @@ class ModelInterpreter implements Serializable {
      * @return The return of the resulting executed closure
      */
     def inDeclarativeAgent(Object context, Root root, Agent agent, Closure body) {
-        if (agent == null
-            && root.agent.getDeclarativeAgent(root, root) instanceof AbstractDockerAgent
-            && root.options?.options?.get("newContainerPerStage") != null) {
-            agent = root.agent
+        if (agent != null) {
+            agent.populateMap((Map<String,Object>)instanceFromClosure(agent.rawClosure, Map.class))
+        }
+        if (agent == null) {
+            def declarativeAgent = root.agent.getDeclarativeAgent(root, root)
+            if (declarativeAgent != null && declarativeAgent.reuseRootAgent(root.options?.options ?: [:])) {
+                agent = root.agent
+            }
         }
         if (agent == null) {
             return {
@@ -645,7 +646,7 @@ class ModelInterpreter implements Serializable {
             }
         }
     }
-    
+
     /**
      * Executes a single stage and post-stage actions, and returns any error it may have generated.
      *
@@ -660,7 +661,6 @@ class ModelInterpreter implements Serializable {
                 delegateAndExecute(thisStage.steps.closure)
             }
         } catch (Throwable e) {
-            script.getProperty("currentBuild").result = Utils.getResultFromException(e)
             Utils.markStageFailedAndContinued(thisStage.name)
             if (stageError == null) {
                 stageError = e
@@ -669,29 +669,12 @@ class ModelInterpreter implements Serializable {
             // And finally, run the post stage steps.
             if (root.hasSatisfiedConditions(thisStage.post, script.getProperty("currentBuild"), thisStage, stageError)) {
                 Utils.logToTaskListener("Post stage")
-                stageError = runPostConditions(thisStage.post, thisStage.agent ?: parentAgent, stageError, thisStage.name, thisStage)
+                stageError = runPostConditions(thisStage.post, thisStage.agent ?: parentAgent, stageError, thisStage.name)
             }
         }
 
         if (stageError != null) {
             throw stageError
-        }
-    }
-
-    /**
-     *
-     */
-    def evaluateWhen(StageConditionals when, boolean skipDueToParent = false) {
-        if (skipDueToParent) {
-            return false
-        } else if (when == null) {
-            return true
-        } else {
-            // To allow for referencing environment variables that have not yet been declared pre-parse time, we need
-            // to actually instantiate the conditional now, via a closure.
-            return instancesFromClosure(when.rawClosure, DeclarativeStageConditional.class).every {
-                it?.getScript(script)?.evaluate()
-            }
         }
     }
 
@@ -717,13 +700,25 @@ class ModelInterpreter implements Serializable {
 
         return instanceList
     }
+
+    private <Z> Z instanceFromClosure(Closure rawClosure, Class<Z> instanceType) {
+        rawClosure.delegate = script
+        rawClosure.resolveStrategy = Closure.DELEGATE_FIRST
+
+        def inst = rawClosure.call()
+        if (instanceType.isInstance(inst)) {
+            return instanceType.cast(inst)
+        }
+
+        return null
+    }
+
     /**
      * Executes the post build actions for this build
      * @param root The root context we're executing in
      */
-    def executePostBuild(Root root) throws Throwable {
-        Throwable stageError = null
-        if (root.hasSatisfiedConditions(root.post, script.getProperty("currentBuild"))) {
+    def executePostBuild(Root root, Throwable stageError) throws Throwable {
+        if (root.hasSatisfiedConditions(root.post, script.getProperty("currentBuild"), root, stageError)) {
             script.stage(SyntheticStageNames.postBuild()) {
                 stageError = runPostConditions(root.post, root.agent, stageError)
             }
@@ -746,26 +741,41 @@ class ModelInterpreter implements Serializable {
     def runPostConditions(AbstractBuildConditionResponder responder,
                           Agent agentContext,
                           Throwable stageError,
-                          String stageName = null,
-                          Object context = null) {
+                          String stageName = null) {
         BuildCondition.orderedConditionNames.each { conditionName ->
+            RunWrapper runWrapper = script.getProperty("currentBuild")
+            String originalResultString = runWrapper.result
+            Result originalResult = originalResultString == null ? null : Result.fromString(originalResultString)
+            Result logicalResult = BuildCondition.getCombinedResult((WorkflowRun)runWrapper.rawBuild, stageError, stageName)
             try {
-                Closure c = responder.closureForSatisfiedCondition(conditionName, script.getProperty("currentBuild"),
-                    context, stageError)
+                Closure c = responder.closureForSatisfiedCondition(conditionName, runWrapper,
+                    stageName, stageError)
                 if (c != null) {
+                    runWrapper.rawBuild.@result = logicalResult
                     catchRequiredContextForNode(agentContext) {
                         delegateAndExecute(c)
                     }
                 }
             } catch (Throwable e) {
-                script.getProperty("currentBuild").result = Utils.getResultFromException(e)
                 if (stageName != null) {
                     Utils.markStageFailedAndContinued(stageName)
                 }
                 Utils.logToTaskListener("Error when executing ${conditionName} post condition:")
-                Utils.logToTaskListener(getFullStackTrace(e))
+                Utils.logToTaskListener(Functions.printThrowable(e))
                 if (stageError == null) {
                     stageError = e
+                }
+            } finally {
+                Result currentResult = Result.fromString(runWrapper.currentResult);
+                // We can't leave the result set because it will interfere with the
+                // final build result, so we reset it to the original value unless
+                // the actual value changed inside of the post condition.However,
+                // if the build result is set to the logical build result manually,
+                // then after the post condition it will be set back to the original
+                // value. This seems ok since the logical result is the same and so
+                // will be reset for any later post conditions.
+                if (currentResult == logicalResult && logicalResult != originalResult) {
+                    runWrapper.rawBuild.@result = originalResult // Intentionally using .@ to bypass the setter which does not allow nulls.
                 }
             }
         }
@@ -793,5 +803,55 @@ class ModelInterpreter implements Serializable {
      */
     def executeProperties(Root root) {
         Utils.updateJobProperties(root.options?.properties, root.triggers?.triggers, root.parameters?.parameters, root.options?.options, script)
+    }
+
+    /**
+     * Provides convenience methods for the hierarchical evaluation of {@link StageConditionals} (before options, befor input, before agent or default).
+     *
+     * @author Falko Modler
+     */
+    private class WhenEvaluator implements Serializable {
+
+        final StageConditionals when
+        boolean passed
+
+        WhenEvaluator(StageConditionals when) {
+            if (when != null) {
+                this.when = when
+                this.passed = false
+            } else {
+                this.when = null
+                this.passed = true
+            }
+        }
+
+        def passedOrNotEvaluatedBeforeOptions() {
+            return evaluateWhen(when?.beforeOptions ?: false)
+        }
+
+        def passedOrNotEvaluatedBeforeInput() {
+            return evaluateWhen(when?.beforeInput ?: false)
+        }
+
+        def passedOrNotEvaluatedBeforeAgent() {
+            return evaluateWhen(when?.beforeAgent ?: false)
+        }
+
+        def passedOrNotEvaluated() {
+            return evaluateWhen()
+        }
+
+        private evaluateWhen(boolean evaluateNow = true) {
+            if (passed || !evaluateNow) {
+                return true
+            } else {
+                // To allow for referencing environment variables that have not yet been declared pre-parse time, we need
+                // to actually instantiate the conditional now, via a closure.
+                passed = instancesFromClosure(when.rawClosure, DeclarativeStageConditional.class).every {
+                    return it?.getScript(script)?.evaluate()
+                }
+                return passed
+            }
+        }
     }
 }

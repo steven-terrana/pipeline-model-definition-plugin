@@ -25,33 +25,19 @@
 
 package org.jenkinsci.plugins.pipeline.modeldefinition.validator;
 
-import org.jenkinsci.plugins.pipeline.modeldefinition.ast.ModelASTAgent;
-import org.jenkinsci.plugins.pipeline.modeldefinition.ast.ModelASTBranch;
-import org.jenkinsci.plugins.pipeline.modeldefinition.ast.ModelASTBuildCondition;
-import org.jenkinsci.plugins.pipeline.modeldefinition.ast.ModelASTBuildConditionsContainer;
-import org.jenkinsci.plugins.pipeline.modeldefinition.ast.ModelASTBuildParameter;
-import org.jenkinsci.plugins.pipeline.modeldefinition.ast.ModelASTBuildParameters;
-import org.jenkinsci.plugins.pipeline.modeldefinition.ast.ModelASTEnvironment;
-import org.jenkinsci.plugins.pipeline.modeldefinition.ast.ModelASTInternalFunctionCall;
-import org.jenkinsci.plugins.pipeline.modeldefinition.ast.ModelASTLibraries;
-import org.jenkinsci.plugins.pipeline.modeldefinition.ast.ModelASTMethodCall;
-import org.jenkinsci.plugins.pipeline.modeldefinition.ast.ModelASTOption;
-import org.jenkinsci.plugins.pipeline.modeldefinition.ast.ModelASTOptions;
-import org.jenkinsci.plugins.pipeline.modeldefinition.ast.ModelASTPipelineDef;
-import org.jenkinsci.plugins.pipeline.modeldefinition.ast.ModelASTPostBuild;
-import org.jenkinsci.plugins.pipeline.modeldefinition.ast.ModelASTPostStage;
-import org.jenkinsci.plugins.pipeline.modeldefinition.ast.ModelASTStage;
-import org.jenkinsci.plugins.pipeline.modeldefinition.ast.ModelASTStageInput;
-import org.jenkinsci.plugins.pipeline.modeldefinition.ast.ModelASTStages;
-import org.jenkinsci.plugins.pipeline.modeldefinition.ast.ModelASTStep;
-import org.jenkinsci.plugins.pipeline.modeldefinition.ast.ModelASTTools;
-import org.jenkinsci.plugins.pipeline.modeldefinition.ast.ModelASTTrigger;
-import org.jenkinsci.plugins.pipeline.modeldefinition.ast.ModelASTTriggers;
-import org.jenkinsci.plugins.pipeline.modeldefinition.ast.ModelASTValue;
-import org.jenkinsci.plugins.pipeline.modeldefinition.ast.ModelASTWhen;
-import org.jenkinsci.plugins.pipeline.modeldefinition.ast.ModelASTWhenCondition;
+import org.jenkinsci.plugins.pipeline.modeldefinition.ast.*;
 
 
+/**
+ * A visitor interface that can be used to traverse the AST of a Declarative Pipeline.
+ *
+ * Warning: Do not implement this interface directly in non-Declarative plugins, because this interface is unstable and
+ * may receive backwards-incompatible changes. Instead, use {@link AbstractModelValidator}, which will retain backwards
+ * compatibility.
+ *
+ * @see AbstractModelValidator
+ * @see ModelASTPipelineDef#validate
+ */
 public interface ModelValidator {
     boolean validateElement(ModelASTAgent agent);
 
@@ -89,9 +75,25 @@ public interface ModelValidator {
 
     boolean validateElement(ModelASTPipelineDef pipelineDef);
 
-    boolean validateElement(ModelASTStage stage, boolean isNested);
+    boolean validateElement(ModelASTStageBase stages);
+
+    boolean validateElement(ModelASTStage stage, boolean isWithinParallel);
 
     boolean validateElement(ModelASTStages stages);
+
+    boolean validateElement(ModelASTParallel parallel);
+
+    boolean validateElement(ModelASTMatrix matrix);
+
+    boolean validateElement(ModelASTAxisContainer axes);
+
+    boolean validateElement(ModelASTAxis axis);
+
+    boolean validateElement(ModelASTExcludes excludes);
+
+    boolean validateElement(ModelASTExclude exclude);
+
+    boolean validateElement(ModelASTExcludeAxis axis);
 
     boolean validateElement(ModelASTLibraries libraries);
 

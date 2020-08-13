@@ -25,11 +25,11 @@
 package org.jenkinsci.plugins.pipeline.modeldefinition.generator;
 
 import hudson.Extension;
+import hudson.ExtensionList;
 import hudson.Functions;
 import hudson.model.Action;
 import hudson.model.Descriptor;
 import hudson.model.Item;
-import hudson.model.Job;
 import jenkins.branch.OrganizationFolder;
 import jenkins.model.Jenkins;
 import jenkins.model.TransientActionFactory;
@@ -50,14 +50,11 @@ import org.kohsuke.stapler.HttpResponses;
 import org.kohsuke.stapler.QueryParameter;
 import org.kohsuke.stapler.StaplerRequest;
 
-import javax.annotation.Nonnull;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import edu.umd.cs.findbugs.annotations.NonNull;
+import java.util.*;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import java.util.stream.Collectors;
 
 @Extension
 public class DirectiveGenerator extends Snippetizer {
@@ -72,7 +69,7 @@ public class DirectiveGenerator extends Snippetizer {
         return ACTION_URL;
     }
 
-    @Nonnull
+    @NonNull
     public List<DirectiveDescriptor> getDirectives() {
         return DirectiveDescriptor.all();
     }
@@ -81,7 +78,7 @@ public class DirectiveGenerator extends Snippetizer {
     public HttpResponse doGenerateDirective(StaplerRequest req, @QueryParameter String json) throws Exception {
         // TODO is there not an easier way to do this? Maybe Descriptor.newInstancesFromHeteroList on a one-element JSONArray?
         JSONObject jsonO = JSONObject.fromObject(json);
-        Jenkins j = Jenkins.getActiveInstance();
+        Jenkins j = Jenkins.get();
         Class<?> c = j.getPluginManager().uberClassLoader.loadClass(jsonO.getString("stapler-class"));
         DirectiveDescriptor descriptor = (DirectiveDescriptor)j.getDescriptor(c.asSubclass(AbstractDirective.class));
         if (descriptor == null) {
@@ -145,8 +142,8 @@ public class DirectiveGenerator extends Snippetizer {
         }
 
         @Override
-        @Nonnull
-        public Collection<? extends Action> createFor(@Nonnull WorkflowJob target) {
+        @NonNull
+        public Collection<? extends Action> createFor(@NonNull WorkflowJob target) {
             if (target.hasPermission(Item.EXTENDED_READ)) {
                 return Collections.singleton(new DirectiveGenerator());
             } else {
@@ -165,8 +162,8 @@ public class DirectiveGenerator extends Snippetizer {
         }
 
         @Override
-        @Nonnull
-        public Collection<? extends Action> createFor(@Nonnull OrganizationFolder target) {
+        @NonNull
+        public Collection<? extends Action> createFor(@NonNull OrganizationFolder target) {
             if (target.getProjectFactories().get(AbstractWorkflowMultiBranchProjectFactory.class) != null && target.hasPermission(Item.EXTENDED_READ)) {
                 return Collections.singleton(new DirectiveGenerator());
             } else {
@@ -185,8 +182,8 @@ public class DirectiveGenerator extends Snippetizer {
         }
 
         @Override
-        @Nonnull
-        public Collection<? extends Action> createFor(@Nonnull WorkflowMultiBranchProject target) {
+        @NonNull
+        public Collection<? extends Action> createFor(@NonNull WorkflowMultiBranchProject target) {
             if (target.hasPermission(Item.EXTENDED_READ)) {
                 return Collections.singleton(new DirectiveGenerator());
             } else {
@@ -199,19 +196,19 @@ public class DirectiveGenerator extends Snippetizer {
     @Extension(ordinal = 950L)
     public static class DeclarativeDirectivesLink extends SnippetizerLink {
         @Override
-        @Nonnull
+        @NonNull
         public String getUrl() {
             return ACTION_URL;
         }
 
         @Override
-        @Nonnull
+        @NonNull
         public String getIcon() {
             return "icon-gear2 icon-md";
         }
 
         @Override
-        @Nonnull
+        @NonNull
         public String getDisplayName() {
             return Messages.DirectiveGenerator_DeclarativeDirectivesLink_displayName();
         }
@@ -220,13 +217,13 @@ public class DirectiveGenerator extends Snippetizer {
     @Extension(ordinal = 925L)
     public static class DeclarativeOnlineDocsLink extends SnippetizerLink {
         @Override
-        @Nonnull
+        @NonNull
         public String getUrl() {
             return "https://jenkins.io/doc/book/pipeline/syntax/";
         }
 
         @Override
-        @Nonnull
+        @NonNull
         public String getDisplayName() {
             return Messages.DirectiveGenerator_DeclarativeOnlineDocsLink_displayName();
         }

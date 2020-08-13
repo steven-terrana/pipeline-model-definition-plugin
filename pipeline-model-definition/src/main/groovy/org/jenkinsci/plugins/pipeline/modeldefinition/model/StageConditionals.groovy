@@ -59,16 +59,20 @@ class StageConditionals implements Serializable {
 
     final Closure rawClosure
     final Boolean beforeAgent
+    final Boolean beforeInput
+    final Boolean beforeOptions
 
     @Deprecated
     @Whitelisted
     StageConditionals(Closure rawClosure) {
-        this(rawClosure, null)
+        this(rawClosure, null, null, null)
     }
 
     @Whitelisted
-    StageConditionals(Closure rawClosure, Boolean beforeAgent) {
+    StageConditionals(Closure rawClosure, Boolean beforeAgent, Boolean beforeInput, Boolean beforeOptions) {
         this.rawClosure = rawClosure
         this.beforeAgent = beforeAgent
+        this.beforeInput = beforeInput
+        this.beforeOptions = beforeOptions
     }
 }

@@ -26,14 +26,10 @@ package org.jenkinsci.plugins.pipeline.modeldefinition.actions;
 
 import hudson.Extension;
 import hudson.Util;
-import hudson.model.Action;
-import hudson.model.Cause;
-import hudson.model.CauseAction;
-import hudson.model.Failure;
-import hudson.model.Item;
 import hudson.model.Queue;
-import hudson.model.Run;
+import hudson.model.*;
 import hudson.util.FormValidation;
+import hudson.util.HttpResponses;
 import jenkins.model.Jenkins;
 import jenkins.model.ParameterizedJobMixIn;
 import jenkins.model.TransientActionFactory;
@@ -49,20 +45,22 @@ import org.jenkinsci.plugins.workflow.flow.FlowExecutionOwner;
 import org.jenkinsci.plugins.workflow.job.WorkflowRun;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.DoNotUse;
+import org.kohsuke.accmod.restrictions.NoExternalUse;
+import org.kohsuke.stapler.HttpResponse;
 import org.kohsuke.stapler.QueryParameter;
 import org.kohsuke.stapler.StaplerRequest;
 import org.kohsuke.stapler.StaplerResponse;
+import org.kohsuke.stapler.export.Exported;
+import org.kohsuke.stapler.export.ExportedBean;
 import org.kohsuke.stapler.interceptor.RequirePOST;
 
-import javax.annotation.CheckForNull;
-import javax.annotation.Nonnull;
+import edu.umd.cs.findbugs.annotations.CheckForNull;
+import edu.umd.cs.findbugs.annotations.NonNull;
 import javax.servlet.ServletException;
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.List;
+import java.util.*;
 
+@ExportedBean
 public class RestartDeclarativePipelineAction implements Action {
 
     private final Run run;
@@ -97,6 +95,7 @@ public class RestartDeclarativePipelineAction implements Action {
         return exec instanceof CpsFlowExecution ? (CpsFlowExecution) exec : null;
     }
 
+    @Exported
     public boolean isRestartEnabled() {
         ExecutionModelAction executionModelAction = run.getAction(ExecutionModelAction.class);
 
@@ -105,6 +104,32 @@ public class RestartDeclarativePipelineAction implements Action {
                 run.hasPermission(Item.BUILD) &&
                 run.getParent().isBuildable() &&
                 getExecution() != null;
+    }
+
+    public Api getApi() {
+        return new Api(this);
+    }
+
+    @Restricted(NoExternalUse.class)
+    @RequirePOST
+    public HttpResponse doRestartPipeline(@QueryParameter String stageName) {
+        Map<String, String> result = new HashMap<>();
+        result.put("success", "false");
+
+        if (isRestartEnabled()) {
+            try {
+                run(stageName);
+
+                result.put("success", "true");
+                result.put("message", "ok");
+            } catch (IllegalStateException ise) {
+                result.put("message", "Failure restarting from stage: " + ise);
+            }
+        } else {
+            result.put("message", "not allowed to restart");
+        }
+
+        return HttpResponses.okJSON(result);
     }
 
     @Restricted(DoNotUse.class)
@@ -125,6 +150,7 @@ public class RestartDeclarativePipelineAction implements Action {
         rsp.sendRedirect("../.."); // back to WorkflowJob; new build might not start instantly so cannot redirect to it
     }
 
+    @Exported
     public List<String> getRestartableStages() {
         List<String> stages = new ArrayList<>();
         FlowExecution execution = getExecution();
@@ -145,7 +171,7 @@ public class RestartDeclarativePipelineAction implements Action {
     }
 
     public String getCheckUrl() {
-        return Jenkins.getInstance().getRootUrl() + run.getUrl() + getUrlName() + "/" + "checkStageName";
+        return Jenkins.get().getRootUrl() + run.getUrl() + getUrlName() + "/" + "checkStageName";
     }
 
     public FormValidation doCheckStageName(@QueryParameter String value) {
@@ -200,8 +226,8 @@ public class RestartDeclarativePipelineAction implements Action {
         }
 
         @Override
-        @Nonnull
-        public Collection<? extends Action> createFor(@Nonnull WorkflowRun run) {
+        @NonNull
+        public Collection<? extends Action> createFor(@NonNull WorkflowRun run) {
             return Collections.<Action>singleton(new RestartDeclarativePipelineAction(run));
         }
     }

@@ -1,15 +1,14 @@
 package org.jenkinsci.plugins.pipeline.modeldefinition.ast;
 
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
-
 import net.sf.json.JSONArray;
 import org.jenkinsci.plugins.pipeline.modeldefinition.validator.ModelValidator;
 import org.jenkinsci.plugins.structs.describable.UninstantiatedDescribable;
 
-import javax.annotation.Nonnull;
+import edu.umd.cs.findbugs.annotations.NonNull;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
 
 /**
  * Represents the positional parameters for a step in a list of {@link ModelASTValue}s.
@@ -25,23 +24,19 @@ public final class ModelASTPositionalArgumentList extends ModelASTArgumentList {
     }
 
     @Override
+    @NonNull
     public JSONArray toJSON() {
-        final JSONArray a = new JSONArray();
-        for (ModelASTValue argument: arguments) {
-            a.add(argument.toJSON());
-        }
-        return a;
+        return toJSONArray(arguments);
     }
 
     @Override
-    public void validate(@Nonnull final ModelValidator validator) {
+    public void validate(@NonNull final ModelValidator validator) {
         // Nothing to validate directly
-        for (ModelASTValue argument : arguments) {
-            argument.validate(validator);
-        }
+        validate(validator, arguments);
     }
 
     @Override
+    @NonNull
     public String toGroovy() {
         StringBuilder result = new StringBuilder();
         boolean first = true;
@@ -59,9 +54,7 @@ public final class ModelASTPositionalArgumentList extends ModelASTArgumentList {
     @Override
     public void removeSourceLocation() {
         super.removeSourceLocation();
-        for (ModelASTValue argument : arguments) {
-            argument.removeSourceLocation();
-        }
+        removeSourceLocationsFrom(arguments);
     }
 
     public List<ModelASTValue> getArguments() {

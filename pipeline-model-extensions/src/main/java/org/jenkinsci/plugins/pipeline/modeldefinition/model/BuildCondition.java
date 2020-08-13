@@ -28,21 +28,22 @@ import hudson.ExtensionList;
 import hudson.ExtensionPoint;
 import hudson.Util;
 import hudson.model.Result;
+import org.jenkinsci.plugins.pipeline.modeldefinition.CommonUtils;
 import org.jenkinsci.plugins.structs.SymbolLookup;
+import org.jenkinsci.plugins.workflow.actions.WarningAction;
 import org.jenkinsci.plugins.workflow.cps.CpsFlowExecution;
 import org.jenkinsci.plugins.workflow.flow.FlowExecution;
+import org.jenkinsci.plugins.workflow.graph.FlowNode;
+import org.jenkinsci.plugins.workflow.graphanalysis.DepthFirstScanner;
 import org.jenkinsci.plugins.workflow.job.WorkflowRun;
+import org.jenkinsci.plugins.workflow.steps.FlowInterruptedException;
 import org.jenkinsci.plugins.workflow.support.steps.build.RunWrapper;
 
-import javax.annotation.CheckForNull;
-import javax.annotation.Nonnull;
+import edu.umd.cs.findbugs.annotations.CheckForNull;
+import edu.umd.cs.findbugs.annotations.NonNull;
 import java.io.Serializable;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
+import java.util.stream.StreamSupport;
 
 /**
  * Extension point for build conditions.
@@ -52,7 +53,7 @@ import java.util.Set;
 public abstract class BuildCondition implements Serializable, ExtensionPoint {
 
     @Deprecated
-    public boolean meetsCondition(@Nonnull WorkflowRun r) {
+    public boolean meetsCondition(@NonNull WorkflowRun r) {
         if (Util.isOverridden(BuildCondition.class, getClass(), "meetsCondition", WorkflowRun.class, Object.class, Throwable.class)) {
             return meetsCondition(r, null, null);
         } else {
@@ -60,43 +61,41 @@ public abstract class BuildCondition implements Serializable, ExtensionPoint {
         }
     }
 
-    public boolean meetsCondition(@Nonnull WorkflowRun r, Object context, Throwable error) {
+    public boolean meetsCondition(@NonNull WorkflowRun r, Object context, Throwable error) {
         return meetsCondition(r);
     }
 
     @Deprecated
-    public boolean meetsCondition(@Nonnull Object runWrapperObj) {
+    public boolean meetsCondition(@NonNull Object runWrapperObj) {
         return meetsCondition(runWrapperObj, null, null);
     }
 
-    public boolean meetsCondition(@Nonnull Object runWrapperObj, Object context, Throwable error) {
+    public boolean meetsCondition(@NonNull Object runWrapperObj, Object context, Throwable error) {
         RunWrapper runWrapper = (RunWrapper)runWrapperObj;
         WorkflowRun run = (WorkflowRun)runWrapper.getRawBuild();
         return run != null && meetsCondition(run, context, error);
     }
 
-    @Nonnull
-    protected final Result combineResults(@Nonnull WorkflowRun run) {
-        Result execResult = getExecutionResult(run);
-        Result prevResult = run.getResult();
-        if (prevResult == null) {
-            prevResult = Result.SUCCESS;
-        }
-        if (execResult == null) {
-            return Result.SUCCESS;
-        } else {
-            return execResult.combine(prevResult);
-        }
+    @Deprecated
+    @NonNull
+    protected final Result combineResults(@NonNull WorkflowRun run) {
+        return combineResults(run, null);
+    }
+
+    @Deprecated
+    @NonNull
+    protected final Result combineResults(@NonNull WorkflowRun run, @CheckForNull Throwable error) {
+        return combineResults(run, error, null);
+    }
+
+    @NonNull
+    protected final Result combineResults(@NonNull WorkflowRun run, @CheckForNull Throwable error, @CheckForNull Object context) {
+        return BuildCondition.getCombinedResult(run, error, context);
     }
 
     @CheckForNull
-    protected Result getExecutionResult(@Nonnull WorkflowRun r) {
-        FlowExecution execution = r.getExecution();
-        if (execution instanceof CpsFlowExecution) {
-            return ((CpsFlowExecution) execution).getResult();
-        } else {
-            return r.getResult();
-        }
+    protected Result getExecutionResult(@NonNull WorkflowRun r) {
+        return BuildCondition.getFlowExecutionResult(r);
     }
 
     public abstract String getDescription();
@@ -140,6 +139,61 @@ public abstract class BuildCondition implements Serializable, ExtensionPoint {
             }
         }
         return conditions;
+    }
+
+    @Deprecated
+    @NonNull
+    public static Result getCombinedResult(@NonNull WorkflowRun run, @CheckForNull Throwable error) {
+        return getCombinedResult(run, error, null);
+    }
+
+    @NonNull
+    public static Result getCombinedResult(@NonNull WorkflowRun run, @CheckForNull Throwable error, @CheckForNull Object context) {
+        Result errorResult = Result.SUCCESS;
+        if (context instanceof String) {
+            String stageName = (String)context;
+            List<FlowNode> startAndEnd = CommonUtils.findPossiblyUnfinishedEndNodeForCurrentStage(stageName, run.getExecution());
+            if (startAndEnd.size() == 2 && startAndEnd.get(0) != null && startAndEnd.get(1) != null) {
+                // TODO: Remove this in favor of moving StatusAndTiming#findWarningBetween public.
+                DepthFirstScanner scanner = new DepthFirstScanner();
+                if (scanner.setup(startAndEnd.get(1), Collections.singletonList(startAndEnd.get(0)))) {
+                    WarningAction warningAction = StreamSupport.stream(scanner.spliterator(), false)
+                            .map(node -> node.getPersistentAction(WarningAction.class))
+                            .filter(Objects::nonNull)
+                            .max(Comparator.comparing(warning -> warning.getResult().ordinal))
+                            .orElse(null);
+                    if (warningAction != null) {
+                        errorResult = warningAction.getResult();
+                    }
+                }
+            }
+        }
+        Result execResult = getFlowExecutionResult(run);
+        Result prevResult = run.getResult();
+        if (prevResult == null) {
+            prevResult = Result.SUCCESS;
+        }
+        if (execResult == null) {
+            execResult = Result.SUCCESS;
+        }
+        if (error != null) {
+            if (error instanceof FlowInterruptedException) {
+                errorResult = ((FlowInterruptedException)error).getResult();
+            } else {
+                errorResult = Result.FAILURE;
+            }
+        }
+        return execResult.combine(prevResult).combine(errorResult);
+    }
+
+    @CheckForNull
+    public static Result getFlowExecutionResult(@NonNull WorkflowRun r) {
+        FlowExecution execution = r.getExecution();
+        if (execution instanceof CpsFlowExecution) {
+            return ((CpsFlowExecution) execution).getResult();
+        } else {
+            return r.getResult();
+        }
     }
 
     private static final long serialVersionUID = 1L;

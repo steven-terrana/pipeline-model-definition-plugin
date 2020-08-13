@@ -1,12 +1,12 @@
 package org.jenkinsci.plugins.pipeline.modeldefinition.ast;
 
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
+import net.sf.json.JSONArray;
+import org.jenkinsci.plugins.pipeline.modeldefinition.validator.ModelValidator;
+
+import edu.umd.cs.findbugs.annotations.NonNull;
 import java.util.LinkedHashMap;
 import java.util.Map;
-import javax.annotation.Nonnull;
-import net.sf.json.JSONArray;
-import net.sf.json.JSONObject;
-import org.jenkinsci.plugins.pipeline.modeldefinition.validator.ModelValidator;
 
 /**
  * Represents the named parameters for a step in a map of {@link ModelASTKey}s and {@link ModelASTValue}s.
@@ -23,15 +23,9 @@ public final class ModelASTNamedArgumentList extends ModelASTArgumentList {
     }
 
     @Override
+    @NonNull
     public JSONArray toJSON() {
-        final JSONArray a = new JSONArray();
-        for (Map.Entry<ModelASTKey, ModelASTValue> entry: arguments.entrySet()) {
-            JSONObject o = new JSONObject();
-            o.accumulate("key", entry.getKey().toJSON());
-            o.accumulate("value", entry.getValue().toJSON());
-            a.add(o);
-        }
-        return a;
+        return toJSONArray(arguments);
     }
 
     /**
@@ -40,14 +34,14 @@ public final class ModelASTNamedArgumentList extends ModelASTArgumentList {
      * @param keyName The name of a key to check for.
      * @return True if a {@link ModelASTKey} with that name is present in the map.
      */
-    public boolean containsKeyName(@Nonnull String keyName) {
+    public boolean containsKeyName(@NonNull String keyName) {
         for (ModelASTKey key: arguments.keySet()) {
             if (keyName.equals(key.getKey())) return true;
         }
         return false;
     }
 
-    public ModelASTKey keyForName(@Nonnull String keyName) {
+    public ModelASTKey keyForName(@NonNull String keyName) {
         for (ModelASTKey key : arguments.keySet()) {
             if (keyName.equals(key.getKey())) {
                 return key;
@@ -56,7 +50,7 @@ public final class ModelASTNamedArgumentList extends ModelASTArgumentList {
         return null;
     }
 
-    public ModelASTValue valueForName(@Nonnull String keyName) {
+    public ModelASTValue valueForName(@NonNull String keyName) {
         if (containsKeyName(keyName)) {
             return arguments.get(keyForName(keyName));
         }
@@ -64,35 +58,21 @@ public final class ModelASTNamedArgumentList extends ModelASTArgumentList {
     }
 
     @Override
-    public void validate(@Nonnull final ModelValidator validator) {
-        for (Map.Entry<ModelASTKey, ModelASTValue> entry : arguments.entrySet()) {
-            entry.getKey().validate(validator);
-            entry.getValue().validate(validator);
-        }
+    public void validate(@NonNull final ModelValidator validator) {
+        // Nothing to validate directly
+        validate(validator, arguments);
     }
 
     @Override
+    @NonNull
     public String toGroovy() {
-        StringBuilder result = new StringBuilder();
-        boolean first = true;
-        for (Map.Entry<ModelASTKey, ModelASTValue> entry : arguments.entrySet()) {
-            if (first) {
-                first = false;
-            } else {
-                result.append(", ");
-            }
-            result.append(entry.getKey().toGroovy()).append(": ").append(entry.getValue().toGroovy());
-        }
-        return result.toString();
+        return toGroovyArgList(arguments, ": ");
     }
 
     @Override
     public void removeSourceLocation() {
         super.removeSourceLocation();
-        for (Map.Entry<ModelASTKey, ModelASTValue> entry : arguments.entrySet()) {
-            entry.getKey().removeSourceLocation();
-            entry.getValue().removeSourceLocation();
-        }
+        removeSourceLocationsFrom(arguments);
     }
 
     public Map<ModelASTKey, ModelASTValue> getArguments() {

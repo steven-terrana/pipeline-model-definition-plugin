@@ -31,34 +31,29 @@ import hudson.model.Run
 import jenkins.model.Jenkins
 import jenkins.util.SystemProperties
 import org.codehaus.groovy.ast.ASTNode
-import org.codehaus.groovy.ast.ClassNode
-import org.codehaus.groovy.ast.GroovyCodeVisitor
 import org.codehaus.groovy.ast.MethodNode
 import org.codehaus.groovy.ast.ModuleNode
 import org.codehaus.groovy.ast.expr.*
 import org.codehaus.groovy.ast.stmt.BlockStatement
 import org.codehaus.groovy.ast.stmt.ExpressionStatement
 import org.codehaus.groovy.ast.stmt.Statement
+import org.codehaus.groovy.classgen.VariableScopeVisitor
 import org.codehaus.groovy.control.SourceUnit
 import org.codehaus.groovy.syntax.Types
 import org.jenkinsci.plugins.pipeline.modeldefinition.DescriptorLookupCache
 import org.jenkinsci.plugins.pipeline.modeldefinition.Messages
+import org.jenkinsci.plugins.pipeline.modeldefinition.ModelStepLoader
 import org.jenkinsci.plugins.pipeline.modeldefinition.Utils
 import org.jenkinsci.plugins.pipeline.modeldefinition.agent.DeclarativeAgentDescriptor
 import org.jenkinsci.plugins.pipeline.modeldefinition.ast.*
-import org.jenkinsci.plugins.pipeline.modeldefinition.ModelStepLoader
 import org.jenkinsci.plugins.pipeline.modeldefinition.model.BuildCondition
-import org.jenkinsci.plugins.pipeline.modeldefinition.validator.DeclarativeValidatorContributor
-import org.jenkinsci.plugins.pipeline.modeldefinition.validator.ErrorCollector
-import org.jenkinsci.plugins.pipeline.modeldefinition.validator.ModelValidator
-import org.jenkinsci.plugins.pipeline.modeldefinition.validator.ModelValidatorImpl
-import org.jenkinsci.plugins.pipeline.modeldefinition.validator.SourceUnitErrorCollector
+import org.jenkinsci.plugins.pipeline.modeldefinition.validator.*
 import org.jenkinsci.plugins.structs.describable.DescribableModel
 import org.jenkinsci.plugins.structs.describable.DescribableParameter
 import org.jenkinsci.plugins.workflow.flow.FlowExecution
 
-import javax.annotation.CheckForNull
-import javax.annotation.Nonnull
+import edu.umd.cs.findbugs.annotations.CheckForNull
+import edu.umd.cs.findbugs.annotations.NonNull
 import java.util.logging.Level
 import java.util.logging.Logger
 
@@ -103,12 +98,12 @@ class ModelParser implements Parser {
         this(sourceUnit, [], execution)
     }
 
-    ModelParser(SourceUnit sourceUnit, @Nonnull List<Class<? extends DeclarativeValidatorContributor>> enabledOptionalValidators) {
+    ModelParser(SourceUnit sourceUnit, @NonNull List<Class<? extends DeclarativeValidatorContributor>> enabledOptionalValidators) {
         this(sourceUnit, enabledOptionalValidators, null)
     }
 
     ModelParser(SourceUnit sourceUnit,
-                @Nonnull List<Class<? extends DeclarativeValidatorContributor>> enabledOptionalValidators,
+                @NonNull List<Class<? extends DeclarativeValidatorContributor>> enabledOptionalValidators,
                 @CheckForNull FlowExecution execution) {
         this.sourceUnit = sourceUnit
         this.errorCollector = new SourceUnitErrorCollector(sourceUnit)
@@ -159,7 +154,7 @@ class ModelParser implements Parser {
         }
 
         if (pst != null) {
-            return parsePipelineStep(pst, secondaryRun)
+            return parsePipelineStep(src, pst, secondaryRun)
         } else {
             // Look for the pipeline step inside methods named call.
             MethodNode callMethod = src.methods.find { it.name == "call" }
@@ -170,7 +165,7 @@ class ModelParser implements Parser {
 
                 if (!pipelineSteps.isEmpty()) {
                     List<ModelASTPipelineDef> pipelineDefs = pipelineSteps.collect { p ->
-                        return parsePipelineStep(p, secondaryRun)
+                        return parsePipelineStep(src, p, secondaryRun)
                     }
                     // Even if there are multiple pipeline blocks, just return the first one - this return value is only
                     // used in a few places: tests, where there will only ever be one, and linting/converting, which also
@@ -186,7 +181,8 @@ class ModelParser implements Parser {
         return null // no 'pipeline', so this doesn't apply
     }
 
-    private @CheckForNull ModelASTPipelineDef parsePipelineStep(Statement pst, boolean secondaryRun = false) {
+    @SuppressFBWarnings(value = "UPM_UNCALLED_PRIVATE_METHOD")
+    private @CheckForNull ModelASTPipelineDef parsePipelineStep(ModuleNode src, Statement pst, boolean secondaryRun = false) {
         ModelASTPipelineDef r = new ModelASTPipelineDef(pst)
 
         def pipelineBlock = matchBlockStatement(pst)
@@ -265,22 +261,27 @@ class ModelParser implements Parser {
 
         // Lazily evaluate r.toJSON() - i.e., only if AST_DEBUG_LOGGING is true.
         astDebugLog {
-            "Model as JSON: ${r.toJSON().toString(2)}"
+            "Model as JSON:\n${r.toJSON().toString(2)}"
         }
         // Only transform the pipeline {} to pipeline({ return root }) if this is being called in the compiler and there
         // are no errors.
         if (!secondaryRun && errorCollector.errorCount == 0) {
-            pipelineBlock.whole.arguments = new RuntimeASTTransformer().transform(r, build)
+            pipelineBlock.whole.arguments = new RuntimeASTTransformer().transform(sourceUnit, r, build)
+
+            // Variables require scoping or they'll throw "Unsupported expression for CPS transformation" errors at runtime
+            VariableScopeVisitor scopeVisitor = new VariableScopeVisitor(sourceUnit)
+            scopeVisitor.visitClass(src.scriptClassDummy)
+
             // Lazily evaluate prettyPrint(...) - i.e., only if AST_DEBUG_LOGGING is true.
             astDebugLog {
-                "Transformed runtime AST: ${ -> prettyPrint(pipelineBlock.whole.arguments)}"
+                "Transformed runtime AST:\n${ -> prettyPrint(pipelineBlock.whole.arguments)}"
             }
         }
 
         return r
     }
 
-    @Nonnull ModelASTStages parseStages(Statement stmt) {
+    @NonNull ModelASTStages parseStages(Statement stmt) {
         def r = new ModelASTStages(stmt)
 
         def m = matchBlockStatement(stmt)
@@ -297,7 +298,249 @@ class ModelParser implements Parser {
         return r
     }
 
-    @Nonnull ModelASTEnvironment parseEnvironment(Statement stmt) {
+    @NonNull ModelASTParallel parseParallel(Statement stmt) {
+        def r = new ModelASTParallel(stmt)
+
+        def m = matchBlockStatement(stmt)
+        if (m==null) {
+            errorCollector.error(r, Messages.ModelParser_ExpectedBlockFor("parallel"))
+        } else {
+            eachStatement(m.body.code) {
+                ModelASTStage s = parseStage(it)
+                if (s != null) {
+                    r.stages.add(s)
+                }
+            }
+        }
+        return r
+    }
+
+    @NonNull ModelASTMatrix parseMatrix(Statement stmt) {
+        def r = new ModelASTMatrix(stmt)
+
+        def m = matchBlockStatement(stmt)
+        if (m==null) {
+            errorCollector.error(r, Messages.ModelParser_ExpectedBlockFor("matrix"))
+        } else {
+            def sectionsSeen = new HashSet()
+            eachStatement(m.body.code) {
+                ModelASTKey placeholderForErrors = new ModelASTKey(it)
+                def mc = matchMethodCall(it)
+                if (mc == null) {
+                    errorCollector.error(placeholderForErrors,
+                            Messages.ModelParser_InvalidSectionDefinition(getSourceText(stmt)))
+                } else {
+                    def name = parseMethodName(mc)
+                    // Here, method name is a "section" name
+                    if (!sectionsSeen.add(name)) {
+                        // Also an error that we couldn't actually detect at model evaluation time.
+                        errorCollector.error(placeholderForErrors, Messages.Parser_MultipleOfSection(name))
+                    }
+
+                    switch (name) {
+                        case 'axes':
+                            r.axes = parseAxes(it);
+                            break;
+                        case 'excludes':
+                            r.excludes = parseExcludes(it);
+                            break;
+                        case 'agent':
+                            r.agent = parseAgent(it)
+                            break
+                        case 'when':
+                            r.when = parseWhen(it)
+                            break
+                        case 'post':
+                            r.post = parsePostStage(it)
+                            break
+                        case 'options':
+                            r.options = parseOptions(it)
+                            r.options.inStage = true
+                            break
+                        case 'input':
+                            r.input = parseInput(it)
+                            break
+                        case 'tools':
+                            r.tools = parseTools(it)
+                            break
+                        case 'environment':
+                            r.environment = parseEnvironment(it)
+                            break
+                        case 'stages':
+                            r.stages = parseStages(it)
+                            break
+                        default:
+                            // We need to check for unknowns here.
+                            errorCollector.error(placeholderForErrors, Messages.Parser_UndefinedSection(name))
+                    }
+                }
+            }
+        }
+        return r
+    }
+
+    @NonNull ModelASTAxisContainer parseAxes(Statement stmt) {
+        def a = new ModelASTAxisContainer(stmt)
+
+        def m = matchBlockStatement(stmt)
+        if (m==null) {
+            errorCollector.error(a, Messages.ModelParser_ExpectedBlockFor("axes"))
+        } else {
+            eachStatement(m.body.code) {
+                ModelASTAxis s = parseAxis(it)
+                if (s != null) {
+                    a.axes.add(s)
+                }
+            }
+        }
+        return a
+    }
+
+    @NonNull ModelASTAxis parseAxis(Statement stmt) {
+        def a = new ModelASTAxis(stmt)
+
+        def m = matchBlockStatement(stmt)
+        if (m == null) {
+            errorCollector.error(a, Messages.ModelParser_ExpectedBlockFor("axis"))
+        } else {
+            def sectionsSeen = new HashSet()
+            eachStatement(m.body.code) {
+                ModelASTKey placeholderForErrors = new ModelASTKey(it)
+                def mc = matchMethodCall(it)
+                if (mc == null) {
+                    errorCollector.error(placeholderForErrors,
+                            Messages.ModelParser_InvalidSectionDefinition(getSourceText(stmt)))
+                } else {
+                    def method = parseMethodCall(mc)
+                    // Here, method name is a "section" name at the top level of the "pipeline" closure, which must be unique.
+                    if (!sectionsSeen.add(method.name)) {
+                        // Also an error that we couldn't actually detect at model evaluation time.
+                        errorCollector.error(placeholderForErrors, Messages.Parser_MultipleOfSection(method.name))
+                    }
+
+                    switch (method.name) {
+                        case 'name':
+                            List<Expression> args = ((TupleExpression) mc.arguments).expressions
+                            if (args.isEmpty()) {
+                                errorCollector.error(placeholderForErrors, Messages.ModelParser_NoArgForField('name'))
+                            } else if (args.size() > 1) {
+                                errorCollector.error(placeholderForErrors, Messages.ModelParser_TooManyArgsForField('name'))
+                            } else {
+                                a.name = new ModelASTKey(args[0])
+                                a.name.key = parseStringLiteralOrEmpty(args[0])
+                            }
+                            break
+                        case 'values':
+                            a.values.addAll(method.args);
+                            break
+                        default:
+                            // We need to check for unknowns here.
+                            errorCollector.error(placeholderForErrors, Messages.Parser_UndefinedSection(method.name))
+                    }
+                }
+            }
+        }
+
+        return a
+    }
+
+    @NonNull ModelASTExcludes parseExcludes(Statement stmt) {
+        def a = new ModelASTExcludes(stmt)
+
+        def m = matchBlockStatement(stmt)
+        if (m==null) {
+            errorCollector.error(a, Messages.ModelParser_ExpectedBlockFor("excludes"))
+        } else {
+            eachStatement(m.body.code) {
+                ModelASTExclude s = parseExclude(it)
+                if (s != null) {
+                    a.excludes.add(s)
+                }
+            }
+        }
+        return a
+    }
+
+    @NonNull ModelASTExclude parseExclude(Statement stmt) {
+        def a = new ModelASTExclude(stmt)
+
+        def m = matchBlockStatement(stmt)
+        if (m==null) {
+            errorCollector.error(a, Messages.ModelParser_ExpectedBlockFor("exclude"))
+        } else {
+            eachStatement(m.body.code) {
+                ModelASTExcludeAxis s = parseExcludeAxis(it)
+                if (s != null) {
+                    a.axes.add(s)
+                }
+            }
+        }
+        return a
+    }
+
+    @NonNull ModelASTExcludeAxis parseExcludeAxis(Statement stmt) {
+//        return (ModelASTExcludeAxis) parseAxis(stmt)
+        def a = new ModelASTExcludeAxis(stmt)
+
+        def m = matchBlockStatement(stmt)
+        if (m == null) {
+            errorCollector.error(a, Messages.ModelParser_ExpectedBlockFor("axis"))
+        } else {
+            def sectionsSeen = new HashSet()
+            eachStatement(m.body.code) {
+                ModelASTKey placeholderForErrors = new ModelASTKey(it)
+                def mc = matchMethodCall(it)
+                if (mc == null) {
+                    errorCollector.error(placeholderForErrors,
+                            Messages.ModelParser_InvalidSectionDefinition(getSourceText(stmt)))
+                } else {
+                    def method = parseMethodCall(mc)
+                    // Here, method name is a "section" name at the top level of the "pipeline" closure, which must be unique.
+                    if (!sectionsSeen.add(method.name)) {
+                        // Also an error that we couldn't actually detect at model evaluation time.
+                        errorCollector.error(placeholderForErrors, Messages.Parser_MultipleOfSection(method.name))
+                    }
+
+                    switch (method.name) {
+                        case 'name':
+                            List<Expression> args = ((TupleExpression) mc.arguments).expressions
+                            if (args.isEmpty()) {
+                                errorCollector.error(placeholderForErrors, Messages.ModelParser_NoArgForField('name'))
+                            } else if (args.size() > 1) {
+                                errorCollector.error(placeholderForErrors, Messages.ModelParser_TooManyArgsForField('name'))
+                            } else {
+                                a.name = new ModelASTKey(args[0])
+                                a.name.key = parseStringLiteralOrEmpty(args[0])
+                            }
+                            break
+                        case 'values':
+                            // Do not allow values and notValues
+                            if (sectionsSeen.contains("notValues")) {
+                                errorCollector.error(placeholderForErrors, Messages.ModelParser_MatrixExcludeAxisValuesOrNotValues())
+                            }
+                            a.values.addAll(method.args);
+                            break
+                        case 'notValues':
+                            // Do not allow values and notValues
+                            if (sectionsSeen.contains("values")) {
+                                errorCollector.error(placeholderForErrors, Messages.ModelParser_MatrixExcludeAxisValuesOrNotValues())
+                            }
+                            a.inverse = Boolean.TRUE;
+                            a.values.addAll(method.args);
+                            break
+                        default:
+                            // We need to check for unknowns here.
+                            errorCollector.error(placeholderForErrors, Messages.Parser_UndefinedSection(method.name))
+                    }
+                }
+            }
+        }
+
+        return a
+    }
+
+
+    @NonNull ModelASTEnvironment parseEnvironment(Statement stmt) {
         def r = new ModelASTEnvironment(stmt)
 
         def m = matchBlockStatement(stmt)
@@ -372,7 +615,7 @@ class ModelParser implements Parser {
      * assuming no errors were encountered on the various subexpressions, in which case it will return null.
      */
     @CheckForNull
-    private ModelASTValue envValueForStringConcat(@Nonnull BinaryExpression exp) {
+    private ModelASTValue envValueForStringConcat(@NonNull BinaryExpression exp) {
         StringBuilder builder = new StringBuilder()
         boolean isLiteral = true
 
@@ -408,7 +651,7 @@ class ModelParser implements Parser {
         }
     }
 
-    private boolean envValueFromArbitraryExpression(@Nonnull Expression e, @Nonnull StringBuilder builder) {
+    private boolean envValueFromArbitraryExpression(@NonNull Expression e, @NonNull StringBuilder builder) {
         if (e instanceof ConstantExpression || e instanceof GStringExpression) {
             ModelASTValue val = parseArgument(e)
             return appendAndIsLiteral(val, builder)
@@ -418,7 +661,7 @@ class ModelParser implements Parser {
         }
     }
 
-    private boolean appendAndIsLiteral(@CheckForNull ModelASTValue val, @Nonnull StringBuilder builder) {
+    private boolean appendAndIsLiteral(@CheckForNull ModelASTValue val, @NonNull StringBuilder builder) {
         if (val == null) {
             return true
         } else if (!val.isLiteral()) {
@@ -430,7 +673,7 @@ class ModelParser implements Parser {
 
     }
 
-    @Nonnull ModelASTLibraries parseLibraries(Statement stmt) {
+    @NonNull ModelASTLibraries parseLibraries(Statement stmt) {
         def r = new ModelASTLibraries(stmt)
 
         def m = matchBlockStatement(stmt)
@@ -465,7 +708,7 @@ class ModelParser implements Parser {
         return r
     }
 
-    @Nonnull ModelASTTools parseTools(Statement stmt) {
+    @NonNull ModelASTTools parseTools(Statement stmt) {
         def r = new ModelASTTools(stmt)
 
         def m = matchBlockStatement(stmt)
@@ -550,8 +793,12 @@ class ModelParser implements Parser {
                                     }
                                     stage.failFast = parallel.failFast
                                 } else {
-                                    // otherwise it's a single line of execution
-                                    stage.branches.add(parseBranch("default", block))
+                                    if (stage.getBranches().isEmpty()) {
+                                        // Only add a 'default' branch here if we don't already have one.
+                                        stage.branches.add(parseBranch("default", block))
+                                    } else {
+                                        break
+                                    }
                                 }
                             } else {
                                 // otherwise it's a single line of execution
@@ -575,17 +822,10 @@ class ModelParser implements Parser {
                             stage.environment = parseEnvironment(s)
                             break
                         case 'parallel':
-                            def parallelStmt = matchBlockStatement(s)
-                            if (parallelStmt == null) {
-                                errorCollector.error(stage, Messages.ModelParser_ExpectedBlockFor("parallel"))
-                            } else {
-                                eachStatement(parallelStmt.body.code) {
-                                    ModelASTStage parallelStage = parseStage(it)
-                                    if (parallelStage != null) {
-                                        stage.parallelContent.add(parallelStage)
-                                    }
-                                }
-                            }
+                            stage.parallel = parseParallel(s)
+                            break
+                        case 'matrix':
+                            stage.matrix = parseMatrix(s)
                             break
                         case 'failFast':
                             stage.setFailFast(parseBooleanMethod(mc))
@@ -669,6 +909,10 @@ class ModelParser implements Parser {
                 def name = parseMethodName(mc)
                 if (name == "beforeAgent") {
                     w.beforeAgent = parseBooleanMethod(mc)
+                } else if (name == "beforeInput") {
+                    w.beforeInput = parseBooleanMethod(mc)
+                } else if (name == "beforeOptions") {
+                    w.beforeOptions = parseBooleanMethod(mc)
                 } else {
                     w.conditions.add(parseWhenContent(s))
                 }
@@ -1005,7 +1249,7 @@ class ModelParser implements Parser {
 
 
     private ModelASTArgumentList populateStepArgumentList(final ModelASTStep step, final ModelASTArgumentList origArgs) {
-        if (Jenkins.getInstance() != null && origArgs instanceof ModelASTSingleArgument) {
+        if (Jenkins.getInstanceOrNull() != null && origArgs instanceof ModelASTSingleArgument) {
             ModelASTValue singleArgValue = ((ModelASTSingleArgument)origArgs).value
             ModelASTNamedArgumentList namedArgs = new ModelASTNamedArgumentList(origArgs.sourceLocation)
             Descriptor<? extends Describable> desc = lookup.lookupStepFirstThenFunction(step.name)
@@ -1058,7 +1302,7 @@ class ModelParser implements Parser {
     /**
      * Parses a statement into a {@link ModelASTAgent}
      */
-    @Nonnull ModelASTAgent parseAgent(Statement st) {
+    @NonNull ModelASTAgent parseAgent(Statement st) {
         ModelASTAgent agent = new ModelASTAgent(st)
         def m = matchBlockStatement(st)
         def mc = matchMethodCall(st)
@@ -1107,19 +1351,19 @@ class ModelParser implements Parser {
         return agent
     }
 
-    @Nonnull ModelASTPostBuild parsePostBuild(Statement stmt) {
+    @NonNull ModelASTPostBuild parsePostBuild(Statement stmt) {
         def r = new ModelASTPostBuild(stmt)
 
         return parseBuildConditionResponder(stmt, r)
     }
 
-    @Nonnull ModelASTPostStage parsePostStage(Statement stmt) {
+    @NonNull ModelASTPostStage parsePostStage(Statement stmt) {
         def r = new ModelASTPostStage(stmt)
 
         return parseBuildConditionResponder(stmt, r)
     }
 
-    @Nonnull
+    @NonNull
     <R extends ModelASTBuildConditionsContainer> R parseBuildConditionResponder(Statement stmt, R responder) {
         def m = matchBlockStatement(stmt)
 
@@ -1136,7 +1380,7 @@ class ModelParser implements Parser {
         return responder
     }
 
-    @Nonnull ModelASTBuildCondition parseBuildCondition(Statement st) {
+    @NonNull ModelASTBuildCondition parseBuildCondition(Statement st) {
         ModelASTBuildCondition b = new ModelASTBuildCondition(st)
         def m = matchBlockStatement(st)
         if (m == null) {
@@ -1227,12 +1471,17 @@ class ModelParser implements Parser {
         return val
     }
 
-    protected String parseStringLiteral(Expression exp) {
+    protected String parseStringLiteralOrEmpty(Expression exp) {
         def s = matchStringLiteral(exp)
         if (s==null) {
             errorCollector.error(ModelASTValue.fromConstant(null, exp), Messages.ModelParser_ExpectedStringLiteral())
         }
-        return s?:"error"
+
+        return s ?: ""
+    }
+
+    protected String parseStringLiteral(Expression exp) {
+        return parseStringLiteralOrEmpty(exp) ?: "error"
     }
 
     @CheckForNull String matchStringLiteral(Expression exp) {

@@ -30,19 +30,30 @@ import com.cloudbees.plugins.credentials.CredentialsProvider;
 import com.cloudbees.plugins.credentials.CredentialsScope;
 import com.cloudbees.plugins.credentials.domains.Domain;
 import edu.umd.cs.findbugs.annotations.NonNull;
-import hudson.model.BooleanParameterDefinition;
-import hudson.model.Job;
-import hudson.model.JobProperty;
-import hudson.model.ParametersDefinitionProperty;
-import hudson.model.Result;
-import hudson.model.StringParameterDefinition;
+import hudson.model.*;
 import hudson.model.queue.QueueTaskFuture;
 import hudson.tasks.LogRotator;
 import hudson.triggers.TimerTrigger;
 import hudson.triggers.Trigger;
 import hudson.util.Secret;
+import jenkins.branch.RateLimitBranchProperty;
 import jenkins.model.BuildDiscarder;
 import jenkins.model.BuildDiscarderProperty;
+import org.jenkinsci.plugins.pipeline.modeldefinition.actions.DeclarativeJobPropertyTrackerAction;
+import org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition;
+import org.jenkinsci.plugins.workflow.cps.nodes.StepStartNode;
+import org.jenkinsci.plugins.workflow.flow.FlowExecution;
+import org.jenkinsci.plugins.workflow.graph.FlowNode;
+import org.jenkinsci.plugins.workflow.graphanalysis.DepthFirstScanner;
+import org.jenkinsci.plugins.workflow.job.WorkflowJob;
+import org.jenkinsci.plugins.workflow.job.WorkflowRun;
+import org.jenkinsci.plugins.workflow.job.properties.DisableConcurrentBuildsJobProperty;
+import org.jenkinsci.plugins.workflow.job.properties.PipelineTriggersJobProperty;
+import org.jenkinsci.plugins.workflow.pipelinegraphanalysis.GenericStatus;
+import org.jenkinsci.plugins.workflow.pipelinegraphanalysis.StatusAndTiming;
+import org.junit.Ignore;
+import org.junit.Test;
+import org.jvnet.hudson.test.Issue;
 
 import java.io.Serializable;
 import java.lang.reflect.Field;
@@ -50,26 +61,14 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
-import org.jenkinsci.plugins.pipeline.modeldefinition.actions.DeclarativeJobPropertyTrackerAction;
-import org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition;
-import org.jenkinsci.plugins.workflow.job.WorkflowJob;
-import org.jenkinsci.plugins.workflow.job.WorkflowRun;
-import org.jenkinsci.plugins.workflow.job.properties.DisableConcurrentBuildsJobProperty;
-import org.jenkinsci.plugins.workflow.job.properties.PipelineTriggersJobProperty;
-import org.junit.Ignore;
-import org.junit.Test;
-import org.jvnet.hudson.test.Issue;
-
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotEquals;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertTrue;
+import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.is;
+import static org.junit.Assert.*;
 
 public class OptionsTest extends AbstractModelDefTest {
     @Test
     public void simpleJobProperties() throws Exception {
-        WorkflowRun b = expect("simpleJobProperties")
+        WorkflowRun b = expect("options/simpleJobProperties")
                 .logContains("[Pipeline] { (foo)", "hello")
                 .logNotContains("[Pipeline] { (" + SyntheticStageNames.postBuild() + ")")
                 .go();
@@ -89,7 +88,7 @@ public class OptionsTest extends AbstractModelDefTest {
     @Ignore("Properties are set before withEnv is called.")
     @Test
     public void envVarInOptions() throws Exception {
-        WorkflowRun b = expect("envVarInOptions")
+        WorkflowRun b = expect("environment/envVarInOptions")
                 .logContains("[Pipeline] { (foo)", "hello")
                 .logNotContains("[Pipeline] { (" + SyntheticStageNames.postBuild() + ")")
                 .go();
@@ -162,7 +161,7 @@ public class OptionsTest extends AbstractModelDefTest {
 
     @Test
     public void skipCheckoutFalse() throws Exception {
-        expect("skipCheckoutFalse")
+        expect("options/skipCheckoutFalse")
                 .logContains("[Pipeline] { (foo)",
                         "hello")
                 .go();
@@ -171,15 +170,24 @@ public class OptionsTest extends AbstractModelDefTest {
     @Issue("JENKINS-44277")
     @Test
     public void checkoutToSubdirectory() throws Exception {
-        expect("checkoutToSubdirectory")
+        expect("options/checkoutToSubdirectory")
                 .logContains("[Pipeline] { (foo)",
                         "hello")
                 .go();
     }
 
+    @Issue("JENKINS-44277")
+    @Test
+    public void checkoutToSubdirectoryWithOutsideVarAndFunc() throws Exception {
+        expect("options/checkoutToSubdirectoryWithOutsideVarAndFunc")
+            .logContains("[Pipeline] { (foo)",
+                "hello")
+            .go();
+    }
+
     @Test
     public void simpleWrapper() throws Exception {
-        expect("simpleWrapper")
+        expect("options/simpleWrapper")
                 .logContains("[Pipeline] { (foo)",
                         "[Pipeline] timeout",
                         "hello")
@@ -192,7 +200,7 @@ public class OptionsTest extends AbstractModelDefTest {
             "consistent")
     @Test
     public void envVarInWrapper() throws Exception {
-        expect("envVarInWrapper")
+        expect("environment/envVarInWrapper")
                 .logContains("[Pipeline] { (foo)",
                         "[Pipeline] timeout",
                         "hello")
@@ -214,7 +222,7 @@ public class OptionsTest extends AbstractModelDefTest {
     @Issue("JENKINS-44149")
     @Test
     public void propsRemoved() throws Exception {
-        WorkflowRun b = getAndStartNonRepoBuild("simpleJobProperties");
+        WorkflowRun b = getAndStartNonRepoBuild("options/simpleJobProperties");
         j.assertBuildStatusSuccess(j.waitForCompletion(b));
 
         WorkflowJob job = b.getParent();
@@ -229,7 +237,7 @@ public class OptionsTest extends AbstractModelDefTest {
     @Issue("JENKINS-44621")
     @Test
     public void externalPropsNotRemoved() throws Exception {
-        WorkflowRun b = getAndStartNonRepoBuild("simpleJobProperties");
+        WorkflowRun b = getAndStartNonRepoBuild("options/simpleJobProperties");
         j.assertBuildStatusSuccess(j.waitForCompletion(b));
 
         WorkflowJob job = b.getParent();
@@ -261,7 +269,7 @@ public class OptionsTest extends AbstractModelDefTest {
         j.assertBuildStatusSuccess(j.waitForCompletion(b));
 
         WorkflowJob job = b.getParent();
-        job.setDefinition(new CpsFlowDefinition(pipelineSourceFromResources("simpleJobProperties"), true));
+        job.setDefinition(new CpsFlowDefinition(pipelineSourceFromResources("options/simpleJobProperties"), true));
         j.buildAndAssertSuccess(job);
 
         assertNotNull(job.getProperty(BuildDiscarderProperty.class));
@@ -303,7 +311,7 @@ public class OptionsTest extends AbstractModelDefTest {
         j.assertBuildStatusSuccess(j.waitForCompletion(b));
 
         WorkflowJob job = b.getParent();
-        job.setDefinition(new CpsFlowDefinition(pipelineSourceFromResources("simpleJobProperties"), true));
+        job.setDefinition(new CpsFlowDefinition(pipelineSourceFromResources("options/simpleJobProperties"), true));
 
         // we want to test a job with an old-style logRotator property, for which there is no setter anymore
         try {
@@ -347,7 +355,7 @@ public class OptionsTest extends AbstractModelDefTest {
     @Issue("TBD")
     @Test
     public void retryOptions() throws Exception {
-        expect(Result.FAILURE, "retryOptions")
+        expect(Result.FAILURE, "options/retryOptions")
                 .logContains("Retrying")
                 .go();
     }
@@ -356,7 +364,7 @@ public class OptionsTest extends AbstractModelDefTest {
     @Issue("JENKINS-48115")
     @Test
     public void disableConcurrentBuilds() throws Exception {
-        WorkflowRun b = expect("disableConcurrentBuilds")
+        WorkflowRun b = expect("options/disableConcurrentBuilds")
                 .go();
         WorkflowJob p = b.getParent();
 
@@ -379,7 +387,7 @@ public class OptionsTest extends AbstractModelDefTest {
     @Issue("JENKINS-48380")
     @Test
     public void skipCheckoutInStage() throws Exception {
-        expect("skipCheckoutInStage")
+        expect("options/skipCheckoutInStage")
                 .logContains("[Pipeline] { (foo)",
                         "hello")
                 .go();
@@ -388,7 +396,7 @@ public class OptionsTest extends AbstractModelDefTest {
     @Issue("JENKINS-51227")
     @Test
     public void quietPeriod() throws Exception {
-        WorkflowRun b = expect("quietPeriod")
+        WorkflowRun b = expect("options/quietPeriod")
                 .logContains("hello")
                 .go();
 
@@ -400,7 +408,7 @@ public class OptionsTest extends AbstractModelDefTest {
     @Issue("JENKINS-51227")
     @Test
     public void quietPeriodRemoved() throws Exception {
-        WorkflowRun b = getAndStartNonRepoBuild("quietPeriod");
+        WorkflowRun b = getAndStartNonRepoBuild("options/quietPeriod");
         j.assertBuildStatusSuccess(j.waitForCompletion(b));
 
         WorkflowJob job = b.getParent();
@@ -422,7 +430,7 @@ public class OptionsTest extends AbstractModelDefTest {
         SSHUserPrivateKey c = new DummyPrivateKey(credentialsId, username, passphrase, keyContent);
         CredentialsProvider.lookupStores(j.jenkins).iterator().next().addCredentials(Domain.global(), c);
 
-        expect("withCredentialsWrapper")
+        expect("options/withCredentialsWrapper")
                 .archives("userPass.txt", username + ":" + passphrase)
                 .archives("key.txt", keyContent)
                 .go();
@@ -438,12 +446,106 @@ public class OptionsTest extends AbstractModelDefTest {
         SSHUserPrivateKey c = new DummyPrivateKey(credentialsId, username, passphrase, keyContent);
         CredentialsProvider.lookupStores(j.jenkins).iterator().next().addCredentials(Domain.global(), c);
 
-        expect("withCredentialsStageWrapper")
+        expect("options/withCredentialsStageWrapper")
                 .logContains("THEUSER is null")
                 .archives("userPass.txt", username + ":" + passphrase)
                 .archives("key.txt", keyContent)
                 .go();
     }
+
+    @Issue("JENKINS-50561")
+    @Test
+    public void rateLimitBuilds() throws Exception {
+        WorkflowRun b = expect("options/rateLimitBuilds")
+                .go();
+        WorkflowJob p = b.getParent();
+
+        RateLimitBranchProperty.JobPropertyImpl prop = p.getProperty(RateLimitBranchProperty.JobPropertyImpl.class);
+        assertNotNull(prop);
+        assertEquals(1, prop.getCount());
+        assertEquals("day", prop.getDurationName());
+        assertFalse(prop.isUserBoost());
+
+        QueueTaskFuture<WorkflowRun> inQueue = p.scheduleBuild2(0);
+
+        while (!Queue.getInstance().contains(p)) {
+            Thread.yield();
+        }
+
+        Queue.getInstance().maintain();
+        Queue.Item queued = Queue.getInstance().getItem(p);
+        assertThat(queued.isBlocked(), is(true));
+        assertThat(queued.getCauseOfBlockage().getShortDescription().toLowerCase(),
+                containsString("throttle"));
+
+        inQueue.cancel(true);
+    }
+
+    @Issue("JENKINS-46354")
+    @Test
+    public void topLevelRetryExecutesAllStages() throws Exception {
+        expect("options/topLevelRetryExecutesAllStages")
+                .logContains("Actually executing stage Bar")
+                .go();
+    }
+
+    @Issue("JENKINS-46354")
+    @Test
+    public void parentStageRetryExecutesAllChildStages() throws Exception {
+        expect("options/parentStageRetryExecutesAllChildStages")
+                .logContains("Actually executing stage Bar", "Actually executing stage Baz")
+                .go();
+    }
+
+    @Issue("JENKINS-42039")
+    @Test
+    public void skipAfterUnstableWithOption() throws Exception {
+        WorkflowRun b = expect(Result.UNSTABLE, "options/skipAfterUnstableIfOption")
+                .logContains("[Pipeline] { (foo)", "hello", "[Pipeline] { (bar)")
+                .logNotContains("goodbye")
+                .go();
+
+        FlowExecution execution = b.getExecution();
+        assertNotNull(execution);
+        List<FlowNode> heads = execution.getCurrentHeads();
+        DepthFirstScanner scanner = new DepthFirstScanner();
+        FlowNode startFoo = scanner.findFirstMatch(heads, null, CommonUtils.isStageWithOptionalName("foo"));
+        assertNotNull(startFoo);
+        assertTrue(startFoo instanceof StepStartNode);
+        FlowNode endFoo = scanner.findFirstMatch(heads, null, Utils.endNodeForStage((StepStartNode)startFoo));
+        assertNotNull(endFoo);
+        assertEquals(GenericStatus.UNSTABLE, StatusAndTiming.computeChunkStatus(b, null, startFoo, endFoo, null));
+    }
+
+    @Issue("JENKINS-42039")
+    @Test
+    public void dontSkipAfterUnstableByDefault() throws Exception {
+        expect(Result.UNSTABLE, "options/dontSkipAfterUnstableByDefault")
+                .logContains("[Pipeline] { (foo)", "hello", "[Pipeline] { (bar)", "goodbye")
+                .go();
+    }
+
+    @Test
+    public void sameJobPropertiesNotOverride() throws Exception {
+        WorkflowRun b = getAndStartNonRepoBuild("options/simpleJobProperties");
+        j.assertBuildStatusSuccess(j.waitForCompletion(b));
+        WorkflowJob job = b.getParent();
+
+        BuildDiscarderProperty bdp = job.getProperty(BuildDiscarderProperty.class);
+        assertNotNull(bdp);
+        BuildDiscarder strategy = bdp.getStrategy();
+
+        WorkflowRun b2 = job.scheduleBuild2(0).get();
+        j.assertBuildStatusSuccess(j.waitForCompletion(b2));
+        WorkflowJob job2 = b2.getParent();
+
+        BuildDiscarderProperty bdp2 = job2.getProperty(BuildDiscarderProperty.class);
+        assertNotNull(bdp2);
+        BuildDiscarder strategy2 = bdp.getStrategy();
+
+        assertSame(strategy, strategy2);
+    }
+
 
     private static class DummyPrivateKey extends BaseCredentials implements SSHUserPrivateKey, Serializable {
 

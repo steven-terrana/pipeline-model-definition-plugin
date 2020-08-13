@@ -24,23 +24,23 @@
 package org.jenkinsci.plugins.pipeline.modeldefinition.parser
 
 import com.fasterxml.jackson.databind.JsonNode
-import edu.umd.cs.findbugs.annotations.SuppressFBWarnings
-import org.jenkinsci.plugins.pipeline.modeldefinition.Messages
-import org.jenkinsci.plugins.pipeline.modeldefinition.ast.*
-import org.jenkinsci.plugins.pipeline.modeldefinition.ModelStepLoader
 import com.github.fge.jsonschema.exceptions.JsonReferenceException
 import com.github.fge.jsonschema.exceptions.ProcessingException
 import com.github.fge.jsonschema.jsonpointer.JsonPointer
 import com.github.fge.jsonschema.report.ProcessingMessage
 import com.github.fge.jsonschema.report.ProcessingReport
 import com.github.fge.jsonschema.tree.JsonTree
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings
+import org.jenkinsci.plugins.pipeline.modeldefinition.Messages
+import org.jenkinsci.plugins.pipeline.modeldefinition.ModelStepLoader
+import org.jenkinsci.plugins.pipeline.modeldefinition.ast.*
 import org.jenkinsci.plugins.pipeline.modeldefinition.validator.ErrorCollector
 import org.jenkinsci.plugins.pipeline.modeldefinition.validator.JSONErrorCollector
 import org.jenkinsci.plugins.pipeline.modeldefinition.validator.ModelValidator
 import org.jenkinsci.plugins.pipeline.modeldefinition.validator.ModelValidatorImpl
 
-import javax.annotation.CheckForNull
-import javax.annotation.Nonnull
+import edu.umd.cs.findbugs.annotations.CheckForNull
+import edu.umd.cs.findbugs.annotations.NonNull
 
 /**
  * Parses input JSON into a {@link ModelASTPipelineDef}.
@@ -149,18 +149,112 @@ class JSONParser implements Parser {
         return stages
     }
 
+    @CheckForNull ModelASTParallel parseParallel(JsonTree j) {
+        ModelASTParallel parallel = new ModelASTParallel(j)
+
+        j.node.eachWithIndex { JsonNode entry, int i ->
+            parallel.stages.add(parseStage(j.append(JsonPointer.of(i))))
+        }
+
+        return parallel
+    }
+
+    @CheckForNull ModelASTMatrix parseMatrix(JsonTree j) {
+        ModelASTMatrix matrix = new ModelASTMatrix(j)
+
+        if (j.node.has("axes")) {
+            matrix.axes = parseAxes(j.append(JsonPointer.of("axes")))
+        }
+        if (j.node.has("excludes")) {
+            matrix.excludes = parseExcludes(j.append(JsonPointer.of("excludes")))
+        }
+        if (j.node.has("stages")) {
+            matrix.stages = parseStages(j.append(JsonPointer.of("stages")))
+        }
+
+        parseStageBase(j, matrix)
+
+        return matrix
+    }
+
+    @CheckForNull ModelASTAxisContainer parseAxes(JsonTree j) {
+        ModelASTAxisContainer axes = new ModelASTAxisContainer(j)
+
+        j.node.eachWithIndex { JsonNode entry, int i ->
+            axes.axes.add(parseAxis(j.append(JsonPointer.of(i))))
+        }
+
+        return axes
+    }
+
+    @CheckForNull ModelASTAxis parseAxis(JsonTree j) {
+        ModelASTAxis axis = new ModelASTAxis(j)
+
+        if (j.node.has("name")) {
+            axis.name = parseKey(j.append(JsonPointer.of("name")))
+        }
+
+        if (j.node.has("values")) {
+            JsonTree valueList = j.append(JsonPointer.of("values"))
+            valueList.node.eachWithIndex { JsonNode entry, int i ->
+                axis.values.add(parseValue(valueList.append(JsonPointer.of(i))))
+            }
+        }
+
+        return axis
+    }
+
+    @CheckForNull ModelASTExcludes parseExcludes(JsonTree j) {
+        ModelASTExcludes excludes = new ModelASTExcludes(j)
+
+        j.node.eachWithIndex { JsonNode entry, int i ->
+            excludes.excludes.add(parseExclude(j.append(JsonPointer.of(i))))
+        }
+
+        return excludes
+    }
+
+    @CheckForNull ModelASTExclude parseExclude(JsonTree j) {
+        ModelASTExclude exclude = new ModelASTExclude(j)
+
+        j.node.eachWithIndex { JsonNode entry, int i ->
+            exclude.axes.add(parseExcludeAxis(j.append(JsonPointer.of(i))))
+        }
+
+        return exclude
+    }
+
+    @CheckForNull ModelASTExcludeAxis parseExcludeAxis(JsonTree j) {
+        ModelASTExcludeAxis axis = new ModelASTExcludeAxis(j)
+
+        if (j.node.has("name")) {
+            axis.name = parseKey(j.append(JsonPointer.of("name")))
+        }
+
+        if (j.node.has("inverse")) {
+            axis.inverse = j.node.get("inverse")?.asBoolean()
+        }
+
+        if (j.node.has("values")) {
+            JsonTree valueList = j.append(JsonPointer.of("values"))
+            valueList.node.eachWithIndex { JsonNode entry, int i ->
+                axis.values.add(parseValue(valueList.append(JsonPointer.of(i))))
+            }
+        }
+
+        return axis
+    }
+
     @CheckForNull ModelASTStage parseStage(JsonTree j) {
         ModelASTStage stage = new ModelASTStage(j)
 
         stage.name = j.node.get("name").asText()
-        if (j.node.has("agent")) {
-            stage.agent = parseAgent(j.append(JsonPointer.of("agent")))
-        }
+
         if (j.node.has("parallel")) {
-            JsonTree content = j.append(JsonPointer.of("parallel"))
-            content?.node?.eachWithIndex{ JsonNode entry, int i ->
-                stage.parallelContent.add(parseStage(content.append(JsonPointer.of(i))))
-            }
+            stage.parallel = parseParallel(j.append(JsonPointer.of("parallel")))
+        }
+        if (j.node.has("matrix")) {
+            stage.matrix = parseMatrix(j.append(JsonPointer.of("matrix")))
         }
 
         JsonTree branches = j.append(JsonPointer.of("branches"))
@@ -173,6 +267,17 @@ class JSONParser implements Parser {
         }
         if (j.node.has("failFast") && (stage.branches.size() > 1 || j.node.has("parallel")))  {
             stage.failFast = j.node.get("failFast")?.asBoolean()
+        }
+
+        parseStageBase(j, stage)
+
+        return stage
+
+    }
+
+    @CheckForNull ModelASTStageBase parseStageBase(JsonTree j, ModelASTStageBase stage) {
+        if (j.node.has("agent")) {
+            stage.agent = parseAgent(j.append(JsonPointer.of("agent")))
         }
 
         if (j.node.has("options")) {
@@ -202,7 +307,6 @@ class JSONParser implements Parser {
         return stage
 
     }
-
     @CheckForNull ModelASTStageInput parseInput(JsonTree j) {
         ModelASTStageInput input = new ModelASTStageInput(j)
 
@@ -247,6 +351,14 @@ class JSONParser implements Parser {
 
         if (j.node.has("beforeAgent")) {
             when.beforeAgent = j.node.get("beforeAgent")?.asBoolean()
+        }
+
+        if (j.node.has("beforeInput")) {
+            when.beforeInput = j.node.get("beforeInput")?.asBoolean()
+        }
+
+        if (j.node.has("beforeOptions")) {
+            when.beforeOptions = j.node.get("beforeOptions")?.asBoolean()
         }
 
         JsonTree conditionsTree = j.append(JsonPointer.of("conditions"))
@@ -581,7 +693,7 @@ class JSONParser implements Parser {
         return parseBuildConditionResponder(j, post)
     }
 
-    @Nonnull
+    @NonNull
     <R extends ModelASTBuildConditionsContainer> R parseBuildConditionResponder(JsonTree j, R responder) {
         JsonTree conds = j.append(JsonPointer.of("conditions"))
         conds.node.eachWithIndex { JsonNode entry, int i ->

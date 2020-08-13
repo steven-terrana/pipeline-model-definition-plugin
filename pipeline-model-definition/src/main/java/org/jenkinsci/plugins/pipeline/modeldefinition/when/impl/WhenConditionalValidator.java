@@ -27,17 +27,12 @@ package org.jenkinsci.plugins.pipeline.modeldefinition.when.impl;
 
 import hudson.Extension;
 import org.jenkinsci.plugins.pipeline.modeldefinition.Messages;
-import org.jenkinsci.plugins.pipeline.modeldefinition.ast.ModelASTArgumentList;
-import org.jenkinsci.plugins.pipeline.modeldefinition.ast.ModelASTNamedArgumentList;
-import org.jenkinsci.plugins.pipeline.modeldefinition.ast.ModelASTPositionalArgumentList;
-import org.jenkinsci.plugins.pipeline.modeldefinition.ast.ModelASTSingleArgument;
-import org.jenkinsci.plugins.pipeline.modeldefinition.ast.ModelASTValue;
-import org.jenkinsci.plugins.pipeline.modeldefinition.ast.ModelASTWhenCondition;
+import org.jenkinsci.plugins.pipeline.modeldefinition.ast.*;
 import org.jenkinsci.plugins.pipeline.modeldefinition.validator.DeclarativeValidatorContributor;
 import org.jenkinsci.plugins.workflow.flow.FlowExecution;
 
-import javax.annotation.CheckForNull;
-import javax.annotation.Nonnull;
+import edu.umd.cs.findbugs.annotations.CheckForNull;
+import edu.umd.cs.findbugs.annotations.NonNull;
 import java.util.List;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
@@ -47,7 +42,7 @@ public class WhenConditionalValidator extends DeclarativeValidatorContributor {
 
     @CheckForNull
     @Override
-    public String validateElement(@Nonnull ModelASTWhenCondition condition, @CheckForNull FlowExecution execution) {
+    public String validateElement(@NonNull ModelASTWhenCondition condition, @CheckForNull FlowExecution execution) {
         if (condition.getName().equals("changelog")) {
             String pattern = getPatternArgument(condition.getArgs());
             if (pattern == null) {

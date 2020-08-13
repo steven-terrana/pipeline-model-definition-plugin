@@ -29,7 +29,7 @@ import org.jenkinsci.Symbol
 import org.jenkinsci.plugins.pipeline.modeldefinition.model.BuildCondition
 import org.jenkinsci.plugins.workflow.job.WorkflowRun
 
-import javax.annotation.Nonnull
+import edu.umd.cs.findbugs.annotations.NonNull
 
 /**
  * A {@link BuildCondition} for matching builds with a different status than the previous build.
@@ -40,18 +40,18 @@ import javax.annotation.Nonnull
 class Changed extends BuildCondition {
     @Deprecated
     @Override
-    boolean meetsCondition(@Nonnull WorkflowRun r) {
+    boolean meetsCondition(@NonNull WorkflowRun r) {
         return meetsCondition(r, null, null)
     }
 
     @Override
-    boolean meetsCondition(@Nonnull WorkflowRun r, Object context, Throwable error) {
+    boolean meetsCondition(@NonNull WorkflowRun r, Object context, Throwable error) {
         // Only look at the previous completed build.
         WorkflowRun prev = r.getPreviousCompletedBuild()
 
         // Get the *worst* result of either the execution or the run. If the run's result is null, that's effectively
         // SUCCESS.
-        Result runResult = combineResults(r)
+        Result runResult = combineResults(r, error, null)
 
         // If there's no previous build, we're inherently changed.
         if (prev == null) {

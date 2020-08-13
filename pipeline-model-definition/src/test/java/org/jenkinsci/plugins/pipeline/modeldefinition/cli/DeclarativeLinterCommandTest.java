@@ -30,7 +30,6 @@ import hudson.model.User;
 import jenkins.model.Jenkins;
 import org.apache.commons.io.FileUtils;
 import org.jenkinsci.plugins.pipeline.modeldefinition.AbstractModelDefTest;
-import org.jenkinsci.plugins.pipeline.modeldefinition.cli.DeclarativeLinterCommand;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
@@ -40,9 +39,7 @@ import org.jvnet.hudson.test.MockAuthorizationStrategy;
 import java.io.File;
 import java.io.IOException;
 
-import static hudson.cli.CLICommandInvoker.Matcher.failedWith;
-import static hudson.cli.CLICommandInvoker.Matcher.hasNoErrorOutput;
-import static hudson.cli.CLICommandInvoker.Matcher.succeeded;
+import static hudson.cli.CLICommandInvoker.Matcher.*;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.not;
 import static org.junit.Assert.assertThat;
@@ -74,7 +71,7 @@ public class DeclarativeLinterCommandTest extends AbstractModelDefTest {
     }
 
     @Test
-    public void invalidJenkinsfile() throws Exception {
+    public void invalidJenkinsfileEmptyAgent() throws Exception {
         File testPath = writeJenkinsfileToTmpFile("errors", "emptyAgent");
         j.jenkins.disableSecurity();
 
@@ -85,6 +82,18 @@ public class DeclarativeLinterCommandTest extends AbstractModelDefTest {
         assertThat(result.stdout(), containsString("Errors encountered validating Jenkinsfile:"));
         assertThat(result.stdout(), containsString("Not a valid section definition: \"agent\". Some extra configuration is required"));
     }
+
+     @Test
+     public void invalidJenkinsfileEmptyPipeline() throws Exception {
+         File testPath = writeJenkinsfileToTmpFile("errors", "emptyPipeline");
+         j.jenkins.disableSecurity();
+
+         final CLICommandInvoker.Result result = command.withStdin(FileUtils.openInputStream(testPath)).invoke();
+
+         assertThat(result, failedWith(1));
+         assertThat(result, hasNoErrorOutput());
+         assertThat(result.stdout(), containsString("did not contain the 'pipeline' step"));
+     }
 
     @Test
     public void invalidUser() throws Exception {
@@ -102,7 +111,7 @@ public class DeclarativeLinterCommandTest extends AbstractModelDefTest {
         assertThat(result, not(succeeded()));
         assertThat(result.stderr(), containsString("ERROR: anonymous is missing the Overall/Read permission"));
 
-        declarativeLinterCommand.setTransportAuth(User.get("alice").impersonate());
+        declarativeLinterCommand.setTransportAuth(User.getById("alice", true).impersonate());
         final CLICommandInvoker.Result result2 = command.withStdin(FileUtils.openInputStream(testPath)).invoke();
 
         assertThat(result2, succeeded());

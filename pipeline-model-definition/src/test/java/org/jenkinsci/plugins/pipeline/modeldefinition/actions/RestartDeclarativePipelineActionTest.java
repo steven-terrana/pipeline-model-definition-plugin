@@ -24,30 +24,33 @@
 
 package org.jenkinsci.plugins.pipeline.modeldefinition.actions;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.gargoylesoftware.htmlunit.HttpMethod;
+import com.gargoylesoftware.htmlunit.Page;
+import com.gargoylesoftware.htmlunit.WebRequest;
 import com.gargoylesoftware.htmlunit.html.HtmlForm;
 import com.gargoylesoftware.htmlunit.html.HtmlPage;
 import com.gargoylesoftware.htmlunit.html.HtmlSelect;
-import hudson.model.BooleanParameterValue;
-import hudson.model.Item;
-import hudson.model.ParametersAction;
-import hudson.model.Queue;
-import hudson.model.Result;
-import hudson.model.StringParameterValue;
-import hudson.model.User;
+import com.gargoylesoftware.htmlunit.util.NameValuePair;
+import com.github.fge.jsonschema.util.JsonLoader;
+import hudson.model.*;
 import hudson.scm.ChangeLogSet;
 import hudson.security.ACL;
+import hudson.security.ACLContext;
 import hudson.security.AuthorizationStrategy;
 import hudson.security.SecurityRealm;
+import hudson.security.csrf.CrumbIssuer;
+import hudson.util.RunList;
 import jenkins.branch.BranchSource;
 import jenkins.model.Jenkins;
 import jenkins.plugins.git.GitSCMSource;
 import jenkins.security.NotReallyRoleSensitiveCallable;
 import org.jenkinsci.plugins.pipeline.StageStatus;
 import org.jenkinsci.plugins.pipeline.modeldefinition.AbstractModelDefTest;
+import org.jenkinsci.plugins.pipeline.modeldefinition.CommonUtils;
 import org.jenkinsci.plugins.pipeline.modeldefinition.Utils;
 import org.jenkinsci.plugins.pipeline.modeldefinition.causes.RestartDeclarativePipelineCause;
 import org.jenkinsci.plugins.workflow.actions.NotExecutedNodeAction;
-import org.jenkinsci.plugins.workflow.actions.TagsAction;
 import org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition;
 import org.jenkinsci.plugins.workflow.flow.FlowExecution;
 import org.jenkinsci.plugins.workflow.graph.BlockStartNode;
@@ -62,20 +65,18 @@ import org.jenkinsci.plugins.workflow.pipelinegraphanalysis.StatusAndTiming;
 import org.jenkinsci.plugins.workflow.test.steps.SemaphoreStep;
 import org.junit.Test;
 import org.jvnet.hudson.test.Issue;
+import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.MockAuthorizationStrategy;
 
-import javax.annotation.Nonnull;
+import edu.umd.cs.findbugs.annotations.NonNull;
+import java.net.URL;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
 import static org.hamcrest.Matchers.is;
 import static org.jenkinsci.plugins.pipeline.modeldefinition.BasicModelDefTest.stageStatusPredicate;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertThat;
-import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.*;
 
 public class RestartDeclarativePipelineActionTest extends AbstractModelDefTest {
 
@@ -140,11 +141,9 @@ public class RestartDeclarativePipelineActionTest extends AbstractModelDefTest {
 
     private static boolean canRestart(WorkflowRun b, String user) {
         final RestartDeclarativePipelineAction a = b.getAction(RestartDeclarativePipelineAction.class);
-        return ACL.impersonate(User.get(user).impersonate(), new NotReallyRoleSensitiveCallable<Boolean,RuntimeException>() {
-            @Override public Boolean call() throws RuntimeException {
-                return a.isRestartEnabled();
-            }
-        });
+        try (ACLContext context = ACL.as(User.getById(user, true))) {
+            return a.isRestartEnabled();
+        }
     }
 
     @Issue("JENKINS-45455")
@@ -730,7 +729,58 @@ public class RestartDeclarativePipelineActionTest extends AbstractModelDefTest {
         assertFalse(stageStatusPredicate("second-parallel", StageStatus.getFailedAndContinued()).apply(secondRunSecondParallelStart));
     }
 
-    private HtmlPage restartFromStageInUI(@Nonnull WorkflowRun original, @Nonnull String stageName) throws Exception {
+    @Test
+    public void testDoRestartPipeline() throws Exception {
+        String jobName = "simplePipeline";
+        WorkflowRun r = expect(jobName).go();
+        j.waitUntilNoActivity();
+
+        JenkinsRule.WebClient client = j.createWebClient();
+
+        WebRequest request = new WebRequest(new URL(client.getContextPath() + r.getUrl() + "restart/restartPipeline"));
+        request.setHttpMethod(HttpMethod.POST);
+
+        NameValuePair stageName = new NameValuePair("stageName", "foo");
+
+        // put param
+        List<NameValuePair> params = new ArrayList<>();
+        params.add(stageName);
+
+        CrumbIssuer crumbIssuer = j.jenkins.getCrumbIssuer();
+        if(crumbIssuer != null) {
+            params.add(new NameValuePair(crumbIssuer.getDescriptor().getCrumbRequestField(), crumbIssuer.getCrumb(null)));
+        }
+
+        request.setRequestParameters(params);
+
+        Page page = client.getPage(request);
+
+        // check response
+        String response = page.getWebResponse().getContentAsString();
+        JsonNode json = JsonLoader.fromString(response);
+        assertEquals(json.get("status").asText(), "ok");
+        assertTrue(json.get("data").get("success").asBoolean());
+
+        // check we got actually execute
+        j.waitUntilNoActivity();
+        RunList<WorkflowRun> builds = r.getParent().getBuilds();
+        assertEquals(builds.getLastBuild().getNumber(), 2);
+
+        // test not exists stageName
+        params.remove(stageName);
+        stageName = new NameValuePair("stageName", "foo-not");
+        params.add(stageName);
+
+        page = client.getPage(request);
+
+        // check response with invalid request
+        response = page.getWebResponse().getContentAsString();
+        json = JsonLoader.fromString(response);
+        assertEquals(json.get("status").asText(), "ok");
+        assertFalse(json.get("data").get("success").asBoolean());
+    }
+
+    private HtmlPage restartFromStageInUI(@NonNull WorkflowRun original, @NonNull String stageName) throws Exception {
         RestartDeclarativePipelineAction action = original.getAction(RestartDeclarativePipelineAction.class);
         assertNotNull(action);
         assertTrue(action.isRestartEnabled());
@@ -742,10 +792,10 @@ public class RestartDeclarativePipelineActionTest extends AbstractModelDefTest {
         return j.submit(form);
     }
 
-    private void assertStageIsNotExecuted(@Nonnull String stageName, @Nonnull WorkflowRun run, @Nonnull FlowExecution execution) {
+    private void assertStageIsNotExecuted(@NonNull String stageName, @NonNull WorkflowRun run, @NonNull FlowExecution execution) {
         List<FlowNode> heads = execution.getCurrentHeads();
         DepthFirstScanner scanner = new DepthFirstScanner();
-        FlowNode startStage = scanner.findFirstMatch(heads, null, Utils.isStageWithOptionalName(stageName));
+        FlowNode startStage = scanner.findFirstMatch(heads, null, CommonUtils.isStageWithOptionalName(stageName));
         assertNotNull(startStage);
         assertTrue(startStage instanceof BlockStartNode);
         FlowNode endStage = scanner.findFirstMatch(heads, null, Utils.endNodeForStage((BlockStartNode)startStage));

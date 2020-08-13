@@ -48,8 +48,8 @@ import org.jenkinsci.plugins.structs.SymbolLookup
 import org.jenkinsci.plugins.structs.describable.UninstantiatedDescribable
 import org.jenkinsci.plugins.workflow.steps.StepDescriptor
 
-import javax.annotation.CheckForNull
-import javax.annotation.Nonnull
+import edu.umd.cs.findbugs.annotations.CheckForNull
+import edu.umd.cs.findbugs.annotations.NonNull
 
 import static org.codehaus.groovy.ast.tools.GeneralUtils.*
 
@@ -194,9 +194,20 @@ class ASTParserUtils {
             n.expressions.each {
                 s << prettyPrint(it, ind)
             }
+        } else if (n instanceof NotExpression) {
+            s << printer("- not:", ind)
+            s << prettyPrint(n.expression, ind)
         } else if (n instanceof BooleanExpression) {
             s << printer("- boolexp:", ind)
             s << prettyPrint(n.expression, ind)
+        } else if (n instanceof TernaryExpression) {
+            s << printer("- ternary:", ind)
+            s << printer("- bool:", ind + 1)
+            s << prettyPrint(n.booleanExpression, ind + 1)
+            s << printer("- true:", ind + 1)
+            s << prettyPrint(n.trueExpression, ind + 1)
+            s << printer("- false:", ind + 1)
+            s << prettyPrint(n.falseExpression, ind + 1)
         } else {
             s << printer("- ${n}", ind)
         }
@@ -208,7 +219,7 @@ class ASTParserUtils {
      * Splits out and returns the {@link BlockStatementMatch} corresponding to  the given {@link MethodCallExpression}.
      */
     @CheckForNull
-    static BlockStatementMatch blockStatementFromExpression(@Nonnull MethodCallExpression exp) {
+    static BlockStatementMatch blockStatementFromExpression(@NonNull MethodCallExpression exp) {
         def methodName = matchMethodName(exp)
         def args = (TupleExpression)exp.arguments
         int sz = args.expressions.size()
@@ -273,7 +284,7 @@ class ASTParserUtils {
      * Takes a list of {@link ModelASTElement}s corresponding to {@link Describable}s (such as {@link JobProperty}s, etc),
      * and transforms their Groovy AST nodes into AST from {@link #methodCallToDescribable(MethodCallExpression,Class)}.
      */
-    @Nonnull
+    @NonNull
     static Expression transformListOfDescribables(@CheckForNull List<ModelASTElement> children, Class<? extends Describable> descClass) {
         ListExpression descList = new ListExpression()
 
@@ -304,8 +315,8 @@ class ASTParserUtils {
      */
     static Expression transformDescribableContainer(@CheckForNull ModelASTElement original,
                                                     @CheckForNull List<ModelASTElement> children,
-                                                    @Nonnull Class containerClass,
-                                                    @Nonnull Class<? extends Describable> descClass) {
+                                                    @NonNull Class containerClass,
+                                                    @NonNull Class<? extends Describable> descClass) {
         if (isGroovyAST(original) && !children?.isEmpty()) {
             return ctorX(ClassHelper.make(containerClass), args(transformListOfDescribables(children, descClass)))
         }
@@ -360,7 +371,7 @@ class ASTParserUtils {
      * @return A {@link MapExpression}, or null if the original expression was null.
      */
     @CheckForNull
-    static Expression recurseAndTransformMappedClosure(@CheckForNull ClosureExpression original) {
+    static MapExpression recurseAndTransformMappedClosure(@CheckForNull ClosureExpression original) {
         if (original != null) {
             MapExpression mappedClosure = new MapExpression()
             eachStatement(original.code) { s ->
@@ -420,8 +431,8 @@ class ASTParserUtils {
      * @param expr A method call
      * @return A possibly empty list of expressions
      */
-    @Nonnull
-    static List<Expression> methodCallArgs(@Nonnull MethodCallExpression expr) {
+    @NonNull
+    static List<Expression> methodCallArgs(@NonNull MethodCallExpression expr) {
         return ((TupleExpression) expr.arguments).expressions
     }
 

@@ -30,7 +30,6 @@ import org.jenkinsci.plugins.workflow.job.WorkflowJob;
 import org.jenkinsci.plugins.workflow.job.WorkflowRun;
 import org.jenkinsci.plugins.workflow.test.steps.SemaphoreStep;
 import org.junit.BeforeClass;
-import org.junit.Ignore;
 import org.junit.Test;
 import org.jvnet.hudson.test.Issue;
 
@@ -65,6 +64,56 @@ public class PostStageTest extends AbstractModelDefTest {
         expect(Result.UNSTABLE, "localAll").logContains(ALL_LOCAL_ALWAYS)
                 .logContains("Setting build result UNSTABLE", "I AM UNSTABLE", "I HAVE CHANGED")
                 .logNotContains("I WAS ABORTED", "I FAILED", "MOST DEFINITELY FINISHED").go();
+
+    }
+
+    @Test
+    public void withAllLocalUnsuccessfulWithUnstable() throws Exception {
+        env(s).put("MAKE_RESULT", Result.UNSTABLE.toString()).set();
+        expect(Result.UNSTABLE, "unsuccessful")
+                .logContains("I LOVE YOU VIRGINIA")
+                .logContains("I FAILED YOU, SORRY")
+                .logContains("I AM UNSTABLE")
+                .go();
+
+    }
+
+    @Test
+    public void withAllLocalUnsuccessfulWithAborted() throws Exception {
+        env(s).put("MAKE_RESULT", Result.ABORTED.toString()).set();
+        expect(Result.ABORTED, "unsuccessful")
+                .logContains("I LOVE YOU VIRGINIA")
+                .logContains("I FAILED YOU, SORRY")
+                .go();
+    }
+
+    @Test
+    public void withAllLocalUnsuccessfulWithFailure() throws Exception {
+        env(s).put("MAKE_RESULT", Result.FAILURE.toString()).set();
+        expect(Result.FAILURE, "unsuccessful")
+                .logContains("I LOVE YOU VIRGINIA")
+                .logContains("I FAILED YOU, SORRY")
+                .go();
+
+    }
+
+    @Issue("JENKINS-55476")
+    @Test
+    public void withAllLocalUnsuccessfulWithSuccess() throws Exception {
+        env(s).put("MAKE_RESULT", Result.SUCCESS.toString()).set();
+        expect(Result.SUCCESS, "unsuccessful")
+                .logContains("I LOVE YOU VIRGINIA")
+                .logNotContains("I FAILED YOU, SORRY")
+                .go();
+
+    }
+    @Test
+    public void withAllLocalUnsuccessfulWithNotBuilt() throws Exception {
+        env(s).put("MAKE_RESULT", Result.NOT_BUILT.toString()).set();
+        expect(Result.NOT_BUILT, "unsuccessful")
+                .logContains("I LOVE YOU VIRGINIA")
+                .logContains("I FAILED YOU, SORRY")
+                .go();
 
     }
 
@@ -124,14 +173,6 @@ public class PostStageTest extends AbstractModelDefTest {
 
     @Issue("JENKINS-46276")
     @Test
-    public void withAgentNoneAndAgentDocker() throws Exception {
-        assumeDocker();
-        expect("withAgentNoneAndAgentDocker")
-                .logNotContains("Required context class hudson.FilePath is missing").go();
-    }
-
-    @Issue("JENKINS-46276")
-    @Test
     public void withAgentNoneAndAgentAny() throws Exception {
         expect("withAgentNoneAndAgentAny")
                 .logNotContains("Required context class hudson.FilePath is missing").go();
@@ -142,6 +183,14 @@ public class PostStageTest extends AbstractModelDefTest {
     public void parallelParentPostFailure() throws Exception {
         expect(Result.FAILURE, "parallelParentPostFailure")
                 .logNotContains("PARALLEL STAGE POST").go();
+    }
+
+    @Test
+    public void postWithOutsideVarAndFunc() throws Exception {
+        expect("postWithOutsideVarAndFunc")
+            .logContains("Hi there - This comes from a function")
+            .logNotContains("I FAILED")
+            .go();
     }
 
     @Issue("JENKINS-48266")
@@ -187,7 +236,7 @@ public class PostStageTest extends AbstractModelDefTest {
     @Issue("JENKINS-52114")
     @Test
     public void abortedShouldNotTriggerFailure() throws Exception {
-        onAllowedOS(PossibleOS.LINUX, PossibleOS.MAC);
+        assumeSh();
         WorkflowJob job = j.jenkins.createProject(WorkflowJob.class, "abort");
         job.setDefinition(new CpsFlowDefinition("" +
                 "pipeline {\n" +
@@ -220,7 +269,7 @@ public class PostStageTest extends AbstractModelDefTest {
         Thread.sleep(1000);
         run1.doStop();
 
-        j.assertBuildStatus(Result.ABORTED, j.waitForCompletion(run1));
+        j.waitForCompletion(run1);
 
         j.assertLogContains("I AM ABORTED", run1);
 
@@ -228,6 +277,83 @@ public class PostStageTest extends AbstractModelDefTest {
 
         j.assertLogNotContains("I FAILED", run1);
 
+    }
+
+    @Issue("JENKINS-57826")
+    @Test
+    public void catchErrorStageFailure() throws Exception {
+        expect("catchErrorStageFailure")
+                .logContains("This should happen",
+                       "The build should be a success")
+                .logNotContains("This shouldn't happen",
+                        "The build shouldn't be a failure")
+                .go();
+    }
+
+    @Issue("JENKINS-57826")
+    @Test
+    public void catchErrorStageFailureNested() throws Exception {
+        expect("catchErrorStageFailureNested")
+                .logContains("This should happen",
+                        "The build should be a success")
+                .logNotContains("This shouldn't happen",
+                        "The build shouldn't be a failure")
+                .go();
+    }
+
+    @Issue("JENKINS-57826")
+    @Test
+    public void catchErrorStageAborted() throws Exception {
+        expect("catchErrorStageAborted")
+                .logContains("This should happen",
+                        "The build should be a success")
+                .logNotContains("This shouldn't happen",
+                        "The build shouldn't be aborted")
+                .go();
+    }
+
+    @Issue("JENKINS-57826")
+    @Test
+    public void catchErrorStageUnstable() throws Exception {
+        expect("catchErrorStageUnstable")
+                .logContains("This should happen",
+                        "The build should be a success")
+                .logNotContains("This shouldn't happen",
+                        "The build shouldn't be unstable")
+                .go();
+    }
+
+    @Issue("JENKINS-57826")
+    @Test
+    public void catchErrorStageUnstableBuildFailure() throws Exception {
+        expect(Result.FAILURE, "catchErrorStageUnstableBuildFailure")
+                .logContains("This should happen",
+                        "The build should be a failure")
+                .logNotContains("This shouldn't happen",
+                        "The build shouldn't be unstable")
+                .go();
+    }
+
+    @Issue("JENKINS-57826")
+    @Test
+    public void catchErrorStageNotBuilt() throws Exception {
+        expect("catchErrorStageNotBuilt")
+                .logContains("This should happen",
+                        "The build should be a success")
+                .logNotContains("This shouldn't happen",
+                        "The build shouldn't be not built")
+                .go();
+    }
+
+    @Issue("JENKINS-57826")
+    @Test
+    public void warnErrorStageUnstable() throws Exception {
+        expect(Result.UNSTABLE, "warnErrorStageUnstable")
+                .logContains("This should happen",
+                        "The build should be unstable")
+                .logNotContains("This shouldn't happen",
+                        "The build shouldn't be a success")
+                .go();
     }
 
     @Override

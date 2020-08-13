@@ -1,12 +1,11 @@
 package org.jenkinsci.plugins.pipeline.modeldefinition.ast;
 
-import java.util.ArrayList;
-import java.util.List;
-import net.sf.json.JSONArray;
 import net.sf.json.JSONObject;
 import org.jenkinsci.plugins.pipeline.modeldefinition.validator.ModelValidator;
 
-import javax.annotation.Nonnull;
+import edu.umd.cs.findbugs.annotations.NonNull;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Represents the special case of a step that has a sub-block of further steps within it.
@@ -22,39 +21,27 @@ public class ModelASTTreeStep extends ModelASTStep {
     }
 
     @Override
+    @NonNull
     public JSONObject toJSON() {
-        final JSONArray a = new JSONArray();
-        for (ModelASTStep child:children) {
-            a.add(child.toJSON());
-        }
-        return super.toJSON().accumulate("children", a);
+        return super.toJSON().accumulate("children", toJSONArray(children));
     }
 
     @Override
-    public void validate(@Nonnull final ModelValidator validator) {
+    public void validate(@NonNull final ModelValidator validator) {
         super.validate(validator);
-        for (ModelASTStep child : children) {
-            child.validate(validator);
-        }
+        validate(validator, children);
     }
 
     @Override
+    @NonNull
     public String toGroovy() {
-        StringBuilder result = new StringBuilder();
-        result.append(super.toGroovy()).append(" {\n");
-        for (ModelASTStep child : children) {
-            result.append(child.toGroovy()).append("\n");
-        }
-        result.append("}\n");
-        return result.toString();
+        return toGroovyBlock(super.toGroovy(), children);
     }
 
     @Override
     public void removeSourceLocation() {
         super.removeSourceLocation();
-        for (ModelASTStep child : children) {
-            child.removeSourceLocation();
-        }
+        removeSourceLocationsFrom(children);
     }
 
     public List<ModelASTStep> getChildren() {

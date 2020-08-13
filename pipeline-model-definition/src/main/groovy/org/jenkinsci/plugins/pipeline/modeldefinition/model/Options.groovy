@@ -40,7 +40,7 @@ import org.jenkinsci.plugins.pipeline.modeldefinition.validator.BlockedStepsAndM
 import org.jenkinsci.plugins.scriptsecurity.sandbox.whitelists.Whitelisted
 import org.jenkinsci.plugins.workflow.steps.StepDescriptor
 
-import javax.annotation.Nonnull
+import edu.umd.cs.findbugs.annotations.NonNull
 
 /**
  * Container for job options.
@@ -60,8 +60,8 @@ class Options implements Serializable {
     transient Map<String, Object> wrappers = [:]
 
     @Whitelisted
-    Options(@Nonnull List<JobProperty> properties, @Nonnull Map<String, DeclarativeOption> options,
-            @Nonnull Map<String, Object> wrappers) {
+    Options(@NonNull List<JobProperty> properties, @NonNull Map<String, DeclarativeOption> options,
+            @NonNull Map<String, Object> wrappers) {
         this.properties.addAll(properties)
         this.options.putAll(options)
         this.wrappers.putAll(wrappers)
@@ -112,11 +112,15 @@ class Options implements Serializable {
     }
 
     static Map<String,String> getEligibleWrapperStepClasses() {
-        return wrapperStepsTypeCache.get(WRAPPER_STEPS_KEY)
+        Map<String,String> c = [:]
+        c.putAll(wrapperStepsTypeCache.get(WRAPPER_STEPS_KEY))
+        return c
     }
 
     static Map<String,String> getEligibleDeclarativeOptionTypeClasses() {
-        return optionTypeCache.get(OPTION_CACHE_KEY)
+        Map<String,String> c = [:]
+        c.putAll(optionTypeCache.get(OPTION_CACHE_KEY))
+        return c
     }
 
     protected Object readResolve() throws IOException {
@@ -134,7 +138,8 @@ class Options implements Serializable {
      * @return A map of valid option type keys to their actual type IDs.
      */
     static Map<String,String> getAllowedOptionTypes() {
-        Map<String,String> c = propertyTypeCache.get(CACHE_KEY)
+        Map<String,String> c = [:]
+        c.putAll(propertyTypeCache.get(CACHE_KEY))
         c.putAll(getEligibleDeclarativeOptionTypeClasses())
         c.putAll(getEligibleWrapperStepClasses())
         return c.sort()
@@ -146,7 +151,7 @@ class Options implements Serializable {
      * @param key The key to look up.
      * @return The type ID for that key, if it's in the option types cache.
      */
-    static String typeForKey(@Nonnull String key) {
+    static String typeForKey(@NonNull String key) {
         return getAllowedOptionTypes().get(key)
     }
 }

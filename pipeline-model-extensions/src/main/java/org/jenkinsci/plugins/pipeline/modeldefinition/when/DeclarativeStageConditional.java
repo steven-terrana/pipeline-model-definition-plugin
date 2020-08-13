@@ -27,11 +27,9 @@ package org.jenkinsci.plugins.pipeline.modeldefinition.when;
 
 import hudson.ExtensionPoint;
 import org.jenkinsci.plugins.pipeline.modeldefinition.withscript.WithScriptDescribable;
-import org.jenkinsci.plugins.pipeline.modeldefinition.withscript.WithScriptDescriptor;
 
-import javax.annotation.Nonnull;
+import edu.umd.cs.findbugs.annotations.NonNull;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 
 /**
@@ -44,7 +42,7 @@ public abstract class DeclarativeStageConditional<S extends DeclarativeStageCond
         return (DeclarativeStageConditionalDescriptor) super.getDescriptor();
     }
 
-    @Nonnull
+    @NonNull
     public List<DeclarativeStageConditional<? extends DeclarativeStageConditional>> getChildren() {
         return new ArrayList<>();
     }

@@ -25,11 +25,7 @@ package org.jenkinsci.plugins.pipeline.modeldefinition;
 
 import com.cloudbees.hudson.plugins.folder.Folder;
 import com.google.common.collect.ImmutableList;
-import hudson.model.Descriptor;
-import hudson.model.ParameterDefinition;
-import hudson.model.Result;
-import hudson.model.Run;
-import hudson.model.Slave;
+import hudson.model.*;
 import hudson.slaves.EnvironmentVariablesNodeProperty;
 import hudson.slaves.NodeProperty;
 import hudson.slaves.NodePropertyDescriptor;
@@ -41,6 +37,7 @@ import org.apache.commons.lang.StringUtils;
 import org.hamcrest.Matcher;
 import org.jenkinsci.Symbol;
 import org.jenkinsci.plugins.pipeline.modeldefinition.agent.DeclarativeAgentDescriptor;
+import org.jenkinsci.plugins.pipeline.modeldefinition.parser.RuntimeASTTransformer;
 import org.jenkinsci.plugins.pipeline.modeldefinition.util.HasArchived;
 import org.jenkinsci.plugins.pipeline.modeldefinition.validator.BlockedStepsAndMethodCalls;
 import org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition;
@@ -49,10 +46,7 @@ import org.jenkinsci.plugins.workflow.cps.global.UserDefinedGlobalVariableList;
 import org.jenkinsci.plugins.workflow.cps.global.WorkflowLibRepository;
 import org.jenkinsci.plugins.workflow.job.WorkflowJob;
 import org.jenkinsci.plugins.workflow.job.WorkflowRun;
-import org.junit.Before;
-import org.junit.BeforeClass;
-import org.junit.ClassRule;
-import org.junit.Rule;
+import org.junit.*;
 import org.jvnet.hudson.test.BuildWatcher;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.ToolInstallations;
@@ -61,17 +55,13 @@ import javax.inject.Inject;
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.Charset;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.stream.Collectors;
 
 import static com.jcabi.matchers.RegexMatchers.containsPattern;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.stringContainsInOrder;
-import static org.hamcrest.text.IsEqualIgnoringWhiteSpace.equalToIgnoringWhiteSpace;
+import static org.hamcrest.Matchers.equalToCompressingWhiteSpace;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertThat;
 
@@ -79,6 +69,9 @@ import static org.junit.Assert.assertThat;
  * @author Andrew Bayer
  */
 public abstract class AbstractModelDefTest extends AbstractDeclarativeTest {
+
+    private boolean defaultScriptSplitting = RuntimeASTTransformer.SCRIPT_SPLITTING_TRANSFORMATION;
+
     @ClassRule
     public static BuildWatcher buildWatcher = new BuildWatcher();
     @ClassRule
@@ -116,67 +109,78 @@ public abstract class AbstractModelDefTest extends AbstractDeclarativeTest {
     }
 
     @Before
+    public void setUpFeatureFlags() {
+        defaultScriptSplitting = RuntimeASTTransformer.SCRIPT_SPLITTING_TRANSFORMATION;
+
+        // For testing we want to default to exercising splitting
+        RuntimeASTTransformer.SCRIPT_SPLITTING_TRANSFORMATION = true;
+    }
+
+    @After
+    public void cleanupFeatureFlags() {
+        RuntimeASTTransformer.SCRIPT_SPLITTING_TRANSFORMATION = defaultScriptSplitting;
+    }
+
+
+
+    @Before
     public void setUp() throws Exception {
         ToolInstallations.configureMaven3();
     }
 
     public static final List<String> SHOULD_PASS_CONFIGS = ImmutableList.of(
-            "simplePipeline",
-            "agentAny",
-            "agentLabel",
-            "agentNoneWithNode",
-            "metaStepSyntax",
-            "simpleEnvironment",
+            "agent/agentAny",
+            "agent/agentLabel",
+            "agent/agentNoneWithNode",
+            "basic/singleArgumentNullValue",
+            "steps/metaStepSyntax",
+            "environment/simpleEnvironment",
             "simpleScript",
-            "twoStagePipeline",
-            "validStepParameters",
-            "parallelPipeline",
-            "simplePostBuild",
+            "postStage/simplePostBuild",
             "simpleTools",
-            "legacyMetaStepSyntax",
-            "perStageConfigAgent",
-            "simpleJobProperties",
+            "options/simpleJobProperties",
             "simpleTriggers",
             "simpleParameters",
             "stringsNeedingEscapeLogic",
-            "simpleWrapper",
+            "options/simpleWrapper",
             "multipleWrappers",
-            "multipleVariablesForAgent",
+            "agent/multipleVariablesForAgent",
             "toolsInStage",
-            "environmentInStage",
-            "basicWhen",
-            "skippedWhen",
-            "parallelPipelineWithFailFast",
-            "whenBranchFalse",
-            "whenEnvFalse",
-            "parallelPipelineWithSpaceInBranch",
-            "parallelPipelineQuoteEscaping",
-            "nestedTreeSteps",
-            "inCustomWorkspace",
-            "whenNot",
-            "whenOr",
-            "whenAnd",
-            "whenBeforeAgentTrue",
-            "usernamePassword",
-            "environmentCrossReferences",
-            "nestedParallelStages",
+            "environment/environmentInStage",
+            "parallel/parallelPipelineWithFailFast",
+            "when/whenNestedCombinations",
+            "when/whenEnv",
+            "parallel/parallelPipelineWithSpaceInBranch",
+            "parallel/parallelPipelineQuoteEscaping",
+            "steps/nestedTreeSteps",
+            "agent/inCustomWorkspace",
+            "when/whenBeforeAgentTrue",
+            "when/whenBeforeInputFalse",
+            "environment/usernamePassword",
+            "environment/environmentCrossReferences",
+            "parallel/nestedParallelStages",
             "stagePost",
-            "when/changelog/changelog",
-            "when/changelog/changeset",
-            "backslashReductionInEnv",
-            "stageWrapper"
+            "when/conditions/changelog/changelog",
+            "when/conditions/changelog/changeset",
+            "environment/backslashReductionInEnv",
+            "stageWrapper",
+            "matrix/matrixPipeline",
+            "matrix/matrixPipelineTwoAxis",
+            "matrix/matrixPipelineTwoAxisOneExclude",
+            "matrix/matrixPipelineTwoAxisTwoExcludes",
+            "matrix/matrixPipelineTwoAxisExcludeNot"
     );
 
     public static final List<String> CONVERT_ONLY_SHOULD_PASS_CONFIGS = ImmutableList.of(
             "simpleInput",
             "parametersInInput",
-            "agentDocker",
-            "globalLibrarySuccess",
+            "libraries/globalLibrarySuccess",
             "jsonSchemaNull",
-            "parallelStagesFailFast",
-            "parallelStagesGroupsAndStages",
-            "topLevelStageGroup",
-            "agentOnGroup"
+            "parallel/parallelStagesFailFast",
+            "parallel/parallelStagesFailFastWithOption",
+            "parallel/parallelStagesGroupsAndStages",
+            "basic/topLevelStageGroup",
+            "agent/agentOnGroup"
     );
 
     public static Iterable<Object[]> configsWithErrors() {
@@ -232,6 +236,8 @@ public abstract class AbstractModelDefTest extends AbstractDeclarativeTest {
         result.add(new Object[]{"whenInvalidParameterType", Messages.ModelValidatorImpl_InvalidUnnamedParameterType("class java.lang.String", 4, Integer.class)});
         result.add(new Object[]{"whenMissingRequiredParameter", Messages.ModelValidatorImpl_MissingRequiredStepParameter("value")});
         result.add(new Object[]{"whenUnknownParameter", Messages.ModelValidatorImpl_InvalidStepParameter("banana", "name")});
+
+        //parallel
         result.add(new Object[]{"parallelStagesAndSteps", Messages.ModelValidatorImpl_TwoOfStepsStagesParallel("foo")});
         result.add(new Object[]{"parallelStagesAndGroups", Messages.ModelValidatorImpl_TwoOfStepsStagesParallel("foo")});
         result.add(new Object[]{"parallelStepsAndGroups", Messages.ModelValidatorImpl_TwoOfStepsStagesParallel("foo")});
@@ -239,7 +245,35 @@ public abstract class AbstractModelDefTest extends AbstractDeclarativeTest {
         result.add(new Object[]{"parallelStagesAgentTools", Messages.ModelValidatorImpl_AgentInNestedStages("foo")});
         result.add(new Object[]{"parallelStagesDeepNesting", Messages.ModelValidatorImpl_NoNestedWithinNestedStages()});
         result.add(new Object[]{"parallelStagesGroupsDeepNesting", Messages.ModelValidatorImpl_NoNestedWithinNestedStages()});
-        result.add(new Object[]{"topLevelStageGroupsDeepNesting", Messages.ModelValidatorImpl_NoNestedWithinNestedStages()});
+
+        //matrix
+        // TODO: turn these back on when we update the json files
+        result.add(new Object[]{"matrixStagesAndGroups", Messages.ModelValidatorImpl_TwoOfStepsStagesParallel("foo")});
+        result.add(new Object[]{"matrixStagesAndSteps", Messages.ModelValidatorImpl_TwoOfStepsStagesParallel("foo")});
+        result.add(new Object[]{"matrixParallelStagesGroupsDeepNesting", Messages.ModelValidatorImpl_NoNestedWithinNestedStages()});
+        result.add(new Object[]{"parallelMatrixStagesGroupsDeepNesting", Messages.ModelValidatorImpl_NoNestedWithinNestedStages()});
+        result.add(new Object[]{"matrixStagesDeepNesting", Messages.ModelValidatorImpl_NoNestedWithinNestedStages()});
+
+
+        result.add(new Object[]{"matrixTopLevel", Messages.JSONParser_MissingRequiredProperties("'stages'")});
+//        result.add(new Object[]{"matrixAxisDuplicateName", Messages.ModelValidatorImpl_NoNestedWithinNestedStages()});
+//        result.add(new Object[]{"matrixAxisDuplicateValue", Messages.ModelValidatorImpl_NoNestedWithinNestedStages()});
+//        result.add(new Object[]{"matrixAxisMissingName", Messages.ModelValidatorImpl_NoNestedWithinNestedStages()});
+//        result.add(new Object[]{"matrixAxisMissingValues", Messages.ModelValidatorImpl_NoNestedWithinNestedStages()});
+//        result.add(new Object[]{"matrixAxisNonLiteralValue", Messages.ModelValidatorImpl_NoNestedWithinNestedStages()});
+        result.add(new Object[]{"matrixEmptyAxes", Messages.JSONParser_TooFewItems(0, 1)});
+        result.add(new Object[]{"matrixEmptyExcludes", Messages.JSONParser_TooFewItems(0, 1)});
+        result.add(new Object[]{"matrixEmptyExclude",  Messages.JSONParser_TooFewItems(0, 1)});
+//        result.add(new Object[]{"matrixExcludeAxisDuplicateName", Messages.ModelValidatorImpl_NoNestedWithinNestedStages()});
+//        result.add(new Object[]{"matrixExcludeAxisDuplicateValue", Messages.ModelValidatorImpl_NoNestedWithinNestedStages()});
+//        result.add(new Object[]{"matrixExcludeAxisMissingValues", Messages.ModelValidatorImpl_NoNestedWithinNestedStages()});
+//        result.add(new Object[]{"matrixExcludeAxisMissingName", Messages.ModelValidatorImpl_NoNestedWithinNestedStages()});
+//        result.add(new Object[]{"matrixExcludeValuesWithValuesNot", Messages.ModelValidatorImpl_NoNestedWithinNestedStages()});
+        result.add(new Object[]{"matrixMissingAxes", Messages.JSONParser_MissingRequiredProperties("'axes'")});
+        result.add(new Object[]{"matrixMissingStages", Messages.JSONParser_MissingRequiredProperties("'stages'")});
+
+
+
 
         // TODO: Better error messaging for these schema violations.
         result.add(new Object[]{"nestedWhenWithArgs", "instance failed to match at least one schema"});
@@ -265,27 +299,44 @@ public abstract class AbstractModelDefTest extends AbstractDeclarativeTest {
         return getAndStartBuild(null);
     }
 
+
     protected WorkflowRun getAndStartBuild(Folder folder) throws Exception {
-        WorkflowJob p = createWorkflowJob(folder);
+        return getAndStartBuild(folder, null);
+    }
+
+    protected WorkflowRun getAndStartBuild(Folder folder, String projectName) throws Exception {
+        WorkflowJob p = createWorkflowJob(folder, projectName);
         p.setDefinition(new CpsScmFlowDefinition(new GitStep(sampleRepo.toString()).createSCM(), "Jenkinsfile"));
         return p.scheduleBuild2(0).waitForStart();
     }
+
 
     protected WorkflowRun getAndStartNonRepoBuild(String pipelineScriptFile) throws Exception {
         return getAndStartNonRepoBuild(null, pipelineScriptFile);
     }
 
     protected WorkflowRun getAndStartNonRepoBuild(Folder folder, String pipelineScriptFile) throws Exception {
-        WorkflowJob p = createWorkflowJob(folder);
+        return getAndStartNonRepoBuild(folder, pipelineScriptFile, null);
+    }
+
+    protected WorkflowRun getAndStartNonRepoBuild(Folder folder, String pipelineScriptFile, String projectName) throws Exception {
+        WorkflowJob p = createWorkflowJob(folder, projectName);
         p.setDefinition(new CpsFlowDefinition(pipelineSourceFromResources(pipelineScriptFile), true));
         return p.scheduleBuild2(0).waitForStart();
     }
 
     private WorkflowJob createWorkflowJob(Folder folder) throws IOException {
+        return createWorkflowJob(folder, null);
+    }
+
+    private WorkflowJob createWorkflowJob(Folder folder, String projectName) throws IOException {
         if (folder == null) {
             return j.createProject(WorkflowJob.class);
         } else {
-            return folder.createProject(WorkflowJob.class, "test" + (folder.getItems().size() + 1));
+            if (projectName == null) {
+                projectName = "test" + (folder.getItems().size() + 1);
+            }
+            return folder.createProject(WorkflowJob.class, projectName);
         }
     }
 
@@ -372,6 +423,7 @@ public abstract class AbstractModelDefTest extends AbstractDeclarativeTest {
         private List<String> logContains;
         private List<String> logNotContains;
         private List<String> logMatches;
+        private String projectName;
         private WorkflowRun run;
         private boolean runFromRepo = true;
         private Folder folder; //We use the real stuff here, no mocking fluff
@@ -408,6 +460,11 @@ public abstract class AbstractModelDefTest extends AbstractDeclarativeTest {
 
         public ExpectationsBuilder inFolder(Folder folder) {
             this.folder = folder;
+            return this;
+        }
+
+        public ExpectationsBuilder withProjectName(String projectName) {
+            this.projectName = projectName;
             return this;
         }
 
@@ -457,7 +514,7 @@ public abstract class AbstractModelDefTest extends AbstractDeclarativeTest {
         }
 
         public ExpectationsBuilder archives(String fileName, String content) {
-            return buildMatches(HasArchived.hasArchivedString(equalTo(fileName), equalToIgnoringWhiteSpace(content)));
+            return buildMatches(HasArchived.hasArchivedString(equalTo(fileName), equalToCompressingWhiteSpace(content)));
         }
 
         public ExpectationsBuilder archives(String fileName, Matcher<String> content) {
@@ -477,16 +534,18 @@ public abstract class AbstractModelDefTest extends AbstractDeclarativeTest {
                     } else {
                         prepRepoWithJenkinsfileAndOtherFiles(resourceFullName, otherResources);
                     }
-                    run = getAndStartBuild(folder);
+                    run = getAndStartBuild(folder, projectName);
                 } else {
-                    run = getAndStartNonRepoBuild(folder, resourceFullName);
+                    run = getAndStartNonRepoBuild(folder, resourceFullName, projectName);
                 }
             } else {
                 run = run.getParent().scheduleBuild2(0).waitForStart();
             }
-            j.assertBuildStatus(result, j.waitForCompletion(run));
-            // To deal with some erratic failures due to error logs not showing up until after "completion"
-            Thread.sleep(100);
+            j.waitForCompletion(run);
+            // Calling `j.assertBuildStatus` directly after `j.waitForCompletion` is subject to race conditions in Pipeline jobs, so the call to `j.waitForMessage` is just here to ensure that the build is totally complete before checking the status.
+            // If that race condition is fixed, the call to `j.waitForMessage` can be removed.
+            j.waitForMessage("Finished: " + result, run); // like BuildListener.finished. 
+            j.assertBuildStatus(result, run); // just double-checking
 
             if (logContains != null) {
                 for (String entry : logContains) {

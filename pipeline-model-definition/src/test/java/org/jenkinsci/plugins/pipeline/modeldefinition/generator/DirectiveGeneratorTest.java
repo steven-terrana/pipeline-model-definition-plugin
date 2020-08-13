@@ -41,29 +41,16 @@ import jenkins.model.BuildDiscarderProperty;
 import jenkins.model.OptionalJobProperty;
 import net.sf.json.JSONArray;
 import net.sf.json.JSONObject;
-import org.jenkinsci.plugins.pipeline.modeldefinition.agent.impl.Any;
-import org.jenkinsci.plugins.pipeline.modeldefinition.agent.impl.DockerPipeline;
-import org.jenkinsci.plugins.pipeline.modeldefinition.agent.impl.DockerPipelineFromDockerfile;
-import org.jenkinsci.plugins.pipeline.modeldefinition.agent.impl.Label;
-import org.jenkinsci.plugins.pipeline.modeldefinition.agent.impl.None;
-import org.jenkinsci.plugins.pipeline.modeldefinition.model.Agent;
+import org.checkerframework.checker.units.qual.A;
+import org.jenkinsci.plugins.pipeline.modeldefinition.agent.impl.*;
 import org.jenkinsci.plugins.pipeline.modeldefinition.model.BuildCondition;
+import org.jenkinsci.plugins.pipeline.modeldefinition.model.Matrix;
 import org.jenkinsci.plugins.pipeline.modeldefinition.options.impl.SkipDefaultCheckout;
 import org.jenkinsci.plugins.pipeline.modeldefinition.when.DeclarativeStageConditional;
-import org.jenkinsci.plugins.pipeline.modeldefinition.when.impl.AllOfConditional;
-import org.jenkinsci.plugins.pipeline.modeldefinition.when.impl.AnyOfConditional;
-import org.jenkinsci.plugins.pipeline.modeldefinition.when.impl.BranchConditional;
-import org.jenkinsci.plugins.pipeline.modeldefinition.when.impl.ChangeLogConditional;
-import org.jenkinsci.plugins.pipeline.modeldefinition.when.impl.ChangeSetConditional;
-import org.jenkinsci.plugins.pipeline.modeldefinition.when.impl.EnvironmentConditional;
-import org.jenkinsci.plugins.pipeline.modeldefinition.when.impl.IsRestartedRunConditional;
-import org.jenkinsci.plugins.pipeline.modeldefinition.when.impl.NotConditional;
+import org.jenkinsci.plugins.pipeline.modeldefinition.when.impl.*;
 import org.jenkinsci.plugins.structs.describable.DescribableModel;
 import org.jenkinsci.plugins.structs.describable.DescribableParameter;
-import org.jenkinsci.plugins.structs.describable.UninstantiatedDescribable;
 import org.jenkinsci.plugins.workflow.steps.TimeoutStep;
-import org.jenkinsci.plugins.workflow.util.StaplerReferer;
-import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.ClassRule;
 import org.junit.Test;
@@ -71,8 +58,7 @@ import org.jvnet.hudson.test.Issue;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.ToolInstallations;
 
-import javax.annotation.CheckForNull;
-import javax.annotation.Nonnull;
+import edu.umd.cs.findbugs.annotations.NonNull;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -167,74 +153,8 @@ public class DirectiveGeneratorTest {
     }
 
     @Test
-    public void simpleAgentDocker() throws Exception {
-        AgentDirective agent = new AgentDirective(new DockerPipeline("some-image"));
-        assertGenerateDirective(agent, "agent {\n" +
-                "  docker 'some-image'\n" +
-                "}");
-    }
-
-    @Test
-    public void fullAgentDocker() throws Exception {
-        DockerPipeline dockerPipeline = new DockerPipeline("some-image");
-        dockerPipeline.setAlwaysPull(true);
-        dockerPipeline.setArgs("--some-arg");
-        dockerPipeline.setCustomWorkspace("some/path");
-        dockerPipeline.setLabel("some-label");
-        dockerPipeline.setRegistryCredentialsId("some-cred-id");
-        dockerPipeline.setReuseNode(true);
-        dockerPipeline.setRegistryUrl("http://some.where");
-        AgentDirective agent = new AgentDirective(dockerPipeline);
-
-        assertGenerateDirective(agent, "agent {\n" +
-                "  docker {\n" +
-                "    alwaysPull true\n" +
-                "    args '--some-arg'\n" +
-                "    customWorkspace 'some/path'\n" +
-                "    image 'some-image'\n" +
-                "    label 'some-label'\n" +
-                "    registryCredentialsId 'some-cred-id'\n" +
-                "    registryUrl 'http://some.where'\n" +
-                "    reuseNode true\n" +
-                "  }\n" +
-                "}");
-    }
-
-    @Test
-    public void simpleAgentDockerfile() throws Exception {
-        AgentDirective agent = new AgentDirective(new DockerPipelineFromDockerfile());
-
-        assertGenerateDirective(agent, "agent {\n" +
-                "  dockerfile true\n" +
-                "}");
-    }
-
-    @Test
-    public void fullAgentDockerfile() throws Exception {
-        DockerPipelineFromDockerfile dp = new DockerPipelineFromDockerfile();
-        dp.setAdditionalBuildArgs("--additional-arg");
-        dp.setDir("some-sub/dir");
-        dp.setFilename("NotDockerfile");
-        dp.setArgs("--some-arg");
-        dp.setCustomWorkspace("/custom/workspace");
-        dp.setLabel("some-label");
-        AgentDirective agent = new AgentDirective(dp);
-
-        assertGenerateDirective(agent, "agent {\n" +
-                "  dockerfile {\n" +
-                "    additionalBuildArgs '--additional-arg'\n" +
-                "    args '--some-arg'\n" +
-                "    customWorkspace '/custom/workspace'\n" +
-                "    dir 'some-sub/dir'\n" +
-                "    filename 'NotDockerfile'\n" +
-                "    label 'some-label'\n" +
-                "  }\n" +
-                "}");
-    }
-
-    @Test
     public void whenBranch() throws Exception {
-        WhenDirective when = new WhenDirective(new BranchConditional("some-pattern"), true);
+        WhenDirective when = new WhenDirective(new BranchConditional("some-pattern"), true, false, false);
 
         assertGenerateDirective(when, "when {\n" +
                 "  branch 'some-pattern'\n" +
@@ -243,8 +163,28 @@ public class DirectiveGeneratorTest {
     }
 
     @Test
+    public void whenBranchBeforeInput() throws Exception {
+        WhenDirective when = new WhenDirective(new BranchConditional("some-pattern"), false, true, false);
+
+        assertGenerateDirective(when, "when {\n" +
+                "  branch 'some-pattern'\n" +
+                "  beforeInput true\n" +
+                "}");
+    }
+
+    @Test
+    public void whenBranchBeforeOptions() throws Exception {
+        WhenDirective when = new WhenDirective(new BranchConditional("some-pattern"), false, false, true);
+
+        assertGenerateDirective(when, "when {\n" +
+                "  branch 'some-pattern'\n" +
+                "  beforeOptions true\n" +
+                "}");
+    }
+
+    @Test
     public void whenEnvironment() throws Exception {
-        WhenDirective when = new WhenDirective(new EnvironmentConditional("SOME_VAR", "some value"), false);
+        WhenDirective when = new WhenDirective(new EnvironmentConditional("SOME_VAR", "some value"), false, false, false);
 
         assertGenerateDirective(when, "when {\n" +
                 "  environment name: 'SOME_VAR', value: 'some value'\n" +
@@ -253,7 +193,7 @@ public class DirectiveGeneratorTest {
 
     @Test
     public void whenChangelog() throws Exception {
-        WhenDirective when = new WhenDirective(new ChangeLogConditional("some-pattern"), false);
+        WhenDirective when = new WhenDirective(new ChangeLogConditional("some-pattern"), false, false, false);
         assertGenerateDirective(when, "when {\n" +
                 "  changelog 'some-pattern'\n" +
                 "}");
@@ -261,7 +201,7 @@ public class DirectiveGeneratorTest {
 
     @Test
     public void whenChangeset() throws Exception {
-        WhenDirective when = new WhenDirective(new ChangeSetConditional("some/file/in/changeset"), false);
+        WhenDirective when = new WhenDirective(new ChangeSetConditional("some/file/in/changeset"), false, false, false);
 
         assertGenerateDirective(when, "when {\n" +
                 "  changeset 'some/file/in/changeset'\n" +
@@ -270,7 +210,7 @@ public class DirectiveGeneratorTest {
 
     @Test
     public void whenNot() throws Exception {
-        WhenDirective when = new WhenDirective(new NotConditional(new BranchConditional("some-bad-branch")), false);
+        WhenDirective when = new WhenDirective(new NotConditional(new BranchConditional("some-bad-branch")), false, false, false);
 
         assertGenerateDirective(when, "when {\n" +
                 "  not {\n" +
@@ -284,7 +224,7 @@ public class DirectiveGeneratorTest {
         List<DeclarativeStageConditional<?>> nested = new ArrayList<>();
         nested.add(new BranchConditional("that-branch"));
         nested.add(new BranchConditional("this-branch"));
-        WhenDirective when = new WhenDirective(new AnyOfConditional(nested), true);
+        WhenDirective when = new WhenDirective(new AnyOfConditional(nested), true, false, false);
 
         assertGenerateDirective(when, "when {\n" +
                 "  anyOf {\n" +
@@ -300,7 +240,7 @@ public class DirectiveGeneratorTest {
         List<DeclarativeStageConditional<?>> nested = new ArrayList<>();
         nested.add(new BranchConditional("that-branch"));
         nested.add(new BranchConditional("this-branch"));
-        WhenDirective when = new WhenDirective(new AllOfConditional(nested), false);
+        WhenDirective when = new WhenDirective(new AllOfConditional(nested), false, false, false);
 
         assertGenerateDirective(when, "when {\n" +
                 "  allOf {\n" +
@@ -309,10 +249,10 @@ public class DirectiveGeneratorTest {
                 "  }\n" +
                 "}");
     }
-    
+
     @Test
     public void whenAllOfEmpty() throws Exception {
-        WhenDirective when = new WhenDirective(new AllOfConditional(null), false);
+        WhenDirective when = new WhenDirective(new AllOfConditional(null), false, false, false);
 
         assertGenerateDirective(when, "when {\n" +
                 "  allOf {\n" +
@@ -333,7 +273,7 @@ public class DirectiveGeneratorTest {
 
         nested.add(new AnyOfConditional(veryNested));
 
-        WhenDirective whenDirective = new WhenDirective(new AllOfConditional(nested), false);
+        WhenDirective whenDirective = new WhenDirective(new AllOfConditional(nested), false, false, false);
 
         assertGenerateDirective(whenDirective, "when {\n" +
                 "  allOf {\n" +
@@ -518,8 +458,8 @@ public class DirectiveGeneratorTest {
         List<DeclarativeStageConditional<?>> nested = new ArrayList<>();
         nested.add(new BranchConditional("that-branch"));
         nested.add(new BranchConditional("this-branch"));
-        WhenDirective when = new WhenDirective(new AllOfConditional(nested), false);
-        AgentDirective agent = new AgentDirective(new DockerPipeline("some-image"));
+        WhenDirective when = new WhenDirective(new AllOfConditional(nested), false, false, false);
+        AgentDirective agent = new AgentDirective(new Label("win"));
 
         StageDirective stage = new StageDirective(Arrays.asList(agent, when, env, tools, post), "bob", StageDirective.StageContentType.STEPS);
 
@@ -528,7 +468,7 @@ public class DirectiveGeneratorTest {
                 "    // One or more steps need to be included within the steps block.\n" +
                 "  }\n\n" +
                 "  agent {\n" +
-                "    docker 'some-image'\n" +
+                "    label 'win'\n" +
                 "  }\n\n" +
                 "  when {\n" +
                 "    allOf {\n" +
@@ -557,21 +497,94 @@ public class DirectiveGeneratorTest {
     @Issue("JENKINS-51932")
     @Test
     public void whenIsRestartedRun() throws Exception {
-        WhenDirective when = new WhenDirective(new IsRestartedRunConditional(), false);
+        WhenDirective when = new WhenDirective(new IsRestartedRunConditional(), false, false, false);
         assertGenerateDirective(when, "when {\n" +
                 "  isRestartedRun()\n" +
                 "}");
     }
 
+    @Test
+    public void basicMatrix() throws Exception {
+        MatrixDirective directive = new MatrixDirective(
+                Arrays.asList(
+                        new AxesDirective(//axes
+                                Arrays.asList(
+                                        new AxisDirective("os", "linux, macos, win", false),
+                                        new AxisDirective("browser", "safari, chrome, ie", false)
+                                )),
+                        new ExcludesDirective(
+                                Arrays.asList(new ExcludeDirective(
+                                                Arrays.asList(
+                                                        new AxisDirective("os", "linux", false),
+                                                        new AxisDirective("browser", "safari", false)
+                                                )
+                                        ),
+                                        new ExcludeDirective(
+                                                Arrays.asList(
+                                                        new AxisDirective("os", "win", false),
+                                                        new AxisDirective("browser", "ie", true)
+                                                )
+                                        ))
+                        ),
+                        new StagesDirective(Arrays.asList(
+                                new StageDirective(
+                                        Arrays.asList(), "build-and-test", StageDirective.StageContentType.STEPS
+                                )
+                        ))
+                )
+        );
+        assertGenerateDirective(directive, "matrix {\n" +
+                "  axes {\n" +
+                "    axis {\n" +
+                "      name 'os'\n" +
+                "      values 'linux','macos','win'\n" +
+                "    }axis {\n" +
+                "      name 'browser'\n" +
+                "      values 'safari','chrome','ie'\n" +
+                "    }\n" +
+                "  }\n" +
+                "  excludes {\n" +
+                "    exclude {\n" +
+                "      axis {\n" +
+                "        name 'os'\n" +
+                "        values 'linux'\n" +
+                "      }\n" +
+                "      axis {\n" +
+                "        name 'browser'\n" +
+                "        values 'safari'\n" +
+                "      }\n" +
+                "    }\n" +
+                "    exclude {\n" +
+                "      axis {\n" +
+                "        name 'os'\n" +
+                "        values 'win'\n" +
+                "      }\n" +
+                "      axis {\n" +
+                "        name 'browser'\n" +
+                "        notValues 'ie'\n" +
+                "      }\n" +
+                "    }\n" +
+                "  }\n" +
+                "  stages {\n" +
+                "    stage('build-and-test') {\n" +
+                "      steps {\n" +
+                "        // One or more steps need to be included within the steps block.\n" +
+                "      }\n" +
+                "    }\n" +
+                "\n" +
+                "  }\n" +
+                "\n" +
+                "}");
+
+    }
+
     /**
      * Tests a form submitting part of the generator.
      *
-     * @param desc
-     *      The describable we'll translate to JSON.
-     * @param responseText
-     *      Expected directive snippet to be generated
+     * @param desc         The describable we'll translate to JSON.
+     * @param responseText Expected directive snippet to be generated
      */
-    private void assertGenerateDirective(@Nonnull AbstractDirective desc, @Nonnull String responseText) throws Exception {
+    private void assertGenerateDirective(@NonNull AbstractDirective desc, @NonNull String responseText) throws Exception {
         // First, make sure the expected response text actually matches the toGroovy for the directive.
         assertEquals(desc.toGroovy(true), responseText);
 
@@ -629,7 +642,7 @@ public class DirectiveGeneratorTest {
             Object v = getValue(param, d);
             if (v != null) {
                 if (v instanceof Describable) {
-                    o.accumulate(param.getName(), staplerJsonForDescr((Describable)v));
+                    o.accumulate(param.getName(), staplerJsonForDescr((Describable) v));
                 } else if (v instanceof List && !((List) v).isEmpty()) {
                     JSONArray a = new JSONArray();
                     for (Object obj : (List) v) {

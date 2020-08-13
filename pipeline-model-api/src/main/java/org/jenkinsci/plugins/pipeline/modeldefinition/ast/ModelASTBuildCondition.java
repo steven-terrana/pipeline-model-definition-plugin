@@ -3,7 +3,7 @@ package org.jenkinsci.plugins.pipeline.modeldefinition.ast;
 import net.sf.json.JSONObject;
 import org.jenkinsci.plugins.pipeline.modeldefinition.validator.ModelValidator;
 
-import javax.annotation.Nonnull;
+import edu.umd.cs.findbugs.annotations.NonNull;
 
 /**
  * Represents a single BuildCondition to be checked and possibly executed in either the PostBuild or
@@ -20,26 +20,29 @@ public final class ModelASTBuildCondition extends ModelASTElement {
     }
 
     @Override
+    @NonNull
     public JSONObject toJSON() {
-        return new JSONObject().accumulate("condition", condition).accumulate("branch", branch.toJSON());
+        return new JSONObject()
+                .accumulate("condition", condition)
+                .accumulate("branch", toJSON(branch));
     }
 
     @Override
-    public void validate(@Nonnull ModelValidator validator) {
+    public void validate(@NonNull ModelValidator validator) {
         validator.validateElement(this);
-
-        branch.validate(validator);
+        validate(validator, branch);
     }
 
     @Override
+    @NonNull
     public String toGroovy() {
-        return condition + " {\n" + branch.toGroovy() + "\n}\n";
+        return toGroovyBlock(condition, branch);
     }
 
     @Override
     public void removeSourceLocation() {
         super.removeSourceLocation();
-        branch.removeSourceLocation();
+        removeSourceLocationsFrom(branch);
     }
 
     public String getCondition() {

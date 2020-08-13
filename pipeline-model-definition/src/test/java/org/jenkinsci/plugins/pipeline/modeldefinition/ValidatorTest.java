@@ -32,12 +32,7 @@ import org.jenkinsci.Symbol;
 import org.jenkinsci.plugins.pipeline.modeldefinition.ast.ModelASTOption;
 import org.jenkinsci.plugins.pipeline.modeldefinition.ast.ModelASTPostBuild;
 import org.jenkinsci.plugins.pipeline.modeldefinition.ast.ModelASTStep;
-import org.jenkinsci.plugins.pipeline.modeldefinition.model.BuildCondition;
-import org.jenkinsci.plugins.pipeline.modeldefinition.model.Options;
-import org.jenkinsci.plugins.pipeline.modeldefinition.model.Parameters;
-import org.jenkinsci.plugins.pipeline.modeldefinition.model.StageOptions;
-import org.jenkinsci.plugins.pipeline.modeldefinition.model.Tools;
-import org.jenkinsci.plugins.pipeline.modeldefinition.model.Triggers;
+import org.jenkinsci.plugins.pipeline.modeldefinition.model.*;
 import org.jenkinsci.plugins.pipeline.modeldefinition.parser.Converter;
 import org.jenkinsci.plugins.pipeline.modeldefinition.validator.BlockedStepsAndMethodCalls;
 import org.jenkinsci.plugins.pipeline.modeldefinition.validator.DeclarativeValidatorContributor;
@@ -52,9 +47,8 @@ import org.jvnet.hudson.test.Issue;
 import org.jvnet.hudson.test.TestExtension;
 import org.kohsuke.stapler.DataBoundConstructor;
 
-import javax.annotation.CheckForNull;
-import javax.annotation.Nonnull;
-
+import edu.umd.cs.findbugs.annotations.CheckForNull;
+import edu.umd.cs.findbugs.annotations.NonNull;
 import java.util.Collections;
 
 import static org.junit.Assert.assertNotNull;
@@ -72,7 +66,7 @@ public class ValidatorTest extends AbstractModelDefTest {
     @BeforeClass
     public static void setUpAgent() throws Exception {
         s = j.createOnlineSlave();
-        s.setLabelString("some-label docker");
+        s.setLabelString("some-label");
     }
 
     @Issue("JENKINS-39011")
@@ -94,7 +88,7 @@ public class ValidatorTest extends AbstractModelDefTest {
     @Test
     public void rejectParallelMixedInSteps() throws Exception {
         expectError("rejectParallelMixedInSteps")
-                .logContains(Messages.ModelValidatorImpl_BlockedStep("parallel", 
+                .logContains(Messages.ModelValidatorImpl_BlockedStep("parallel",
                         BlockedStepsAndMethodCalls.blockedInSteps().get("parallel")))
                 .go();
     }
@@ -133,6 +127,111 @@ public class ValidatorTest extends AbstractModelDefTest {
         expectError("emptyTriggers")
                 .logContains(Messages.ModelValidatorImpl_EmptySection("triggers"))
                 .go();
+    }
+
+    @Test
+    public void matrixEmptyAxes() throws Exception {
+        expectError("matrixEmptyAxes")
+            .logContains(Messages.ModelValidatorImpl_NoAxes())
+            .go();
+    }
+
+    @Test
+    public void matrixEmptyExcludes() throws Exception {
+        expectError("matrixEmptyExcludes")
+            .logContains(Messages.ModelValidatorImpl_NoExcludes())
+            .go();
+    }
+
+    @Test
+    public void matrixEmptyExclude() throws Exception {
+        expectError("matrixEmptyExclude")
+            .logContains(Messages.ModelValidatorImpl_NoAxes())
+            .go();
+    }
+
+    @Test
+    public void matrixMissingAxes() throws Exception {
+        expectError("matrixMissingAxes")
+            .logContains(Messages.ModelValidatorImpl_RequiredSection("axes"))
+            .go();
+    }
+
+    @Test
+    public void matrixMissingStages() throws Exception {
+        expectError("matrixMissingStages")
+            .logContains(Messages.ModelValidatorImpl_RequiredSection("stages"))
+            .go();
+    }
+
+    @Test
+    public void matrixAxisMissingName() throws Exception {
+        expectError("matrixAxisMissingName")
+            .logContains(Messages.ModelValidatorImpl_RequiredSection("name"))
+            .go();
+    }
+
+    @Test
+    public void matrixAxisMissingValues() throws Exception {
+        expectError("matrixAxisMissingValues")
+            .logContains(Messages.ModelValidatorImpl_RequiredSection("values"))
+            .go();
+    }
+
+    @Test
+    public void matrixAxisInvalidNameValues() throws Exception {
+        expectError("matrixAxisInvalidNameValues")
+            .logContains(Messages.ModelValidatorImpl_DuplicateAxisName("OS_VALUE"))
+            .logContains(Messages.ModelValidatorImpl_DuplicateAxisValue("safari"))
+            .logContains(Messages.ModelParser_ExpectedStringLiteral())
+            .logContains("name \"${this_is_gstring_name}\"")
+            .logContains(Messages.ModelValidatorImpl_InvalidIdentifierInEnv(""))
+            .logContains(Messages.ModelValidatorImpl_InvalidIdentifierInEnv("1NUMBER"))
+            .logContains(Messages.ModelValidatorImpl_InvalidIdentifierInEnv("$DOLLAR"))
+            .logContains(Messages.ModelValidatorImpl_InvalidIdentifierInEnv("HY-PHEN"))
+            .logContains(Messages.ModelParser_ExpectedStringLiteralButGot("\"${this_is_gstring_value}\""))
+            .logContains(Messages.ModelParser_ExpectedStringLiteralButGot("${[1, 2, 3, 4]}"))
+            .logNotContains("_UNDERSCORE")
+            .logNotContains(Messages.ModelValidatorImpl_DuplicateAxisName(""))
+            .go();
+    }
+
+    @Test
+    public void matrixExcludeAxisMissingName() throws Exception {
+        expectError("matrixAxisMissingName")
+            .logContains(Messages.ModelValidatorImpl_RequiredSection("name"))
+            .go();
+    }
+
+    @Test
+    public void matrixExcludeAxisMissingValues() throws Exception {
+        expectError("matrixAxisMissingValues")
+            .logContains(Messages.ModelValidatorImpl_RequiredSection("values"))
+            .go();
+    }
+
+    @Test
+    public void matrixExcludeAxisInvalidNameValues() throws Exception {
+      expectError("matrixExcludeAxisInvalidNameValues")
+          .logContains(Messages.ModelValidatorImpl_DuplicateAxisName("OS_VALUE"))
+          .logContains(Messages.ModelValidatorImpl_DuplicateAxisValue("safari"))
+          .logContains(Messages.ModelParser_ExpectedStringLiteral())
+          .logContains("name \"${this_is_gstring_name}\"")
+          .logContains(Messages.ModelValidatorImpl_InvalidIdentifierInEnv(""))
+          .logContains(Messages.ModelValidatorImpl_InvalidIdentifierInEnv("1NUMBER"))
+          .logContains(Messages.ModelValidatorImpl_InvalidIdentifierInEnv("$DOLLAR"))
+          .logContains(Messages.ModelValidatorImpl_InvalidIdentifierInEnv("HY-PHEN"))
+          .logContains(Messages.ModelParser_ExpectedStringLiteralButGot("\"${this_is_gstring_value}\""))
+          .logNotContains("_UNDERSCORE")
+          .logNotContains(Messages.ModelValidatorImpl_DuplicateAxisName(""))
+          .go();
+    }
+
+  @Test
+    public void matrixExcludeValuesWithNotValues() throws Exception {
+        expectError("matrixExcludeValuesWithNotValues")
+            .logContains(Messages.ModelParser_MatrixExcludeAxisValuesOrNotValues())
+            .go();
     }
 
     @Test
@@ -686,18 +785,35 @@ public class ValidatorTest extends AbstractModelDefTest {
 
     @Issue("JENKINS-41334")
     @Test
+    public void matrixStagesAgentTools() throws Exception {
+        expectError("matrixStagesAgentTools")
+            .logContains(Messages.ModelValidatorImpl_AgentInNestedStages("foo"),
+                Messages.ModelValidatorImpl_ToolsInNestedStages("foo"))
+            .go();
+    }
+
+    @Issue("JENKINS-41334")
+    @Test
+    public void matrixStagesAndSteps() throws Exception {
+        expectError("matrixStagesAndSteps")
+            .logContains(Messages.ModelValidatorImpl_TwoOfStepsStagesParallel("foo"))
+            .go();
+    }
+
+
+    @Issue("JENKINS-41334")
+    @Test
     public void parallelStagesDeepNesting() throws Exception {
         expectError("parallelStagesDeepNesting")
                 .logContains(Messages.ModelValidatorImpl_NoNestedWithinNestedStages())
                 .go();
     }
 
-    @Issue("JENKINS-41334")
     @Test
-    public void topLevelStageGroupsDeepNesting() throws Exception {
-        expectError("topLevelStageGroupsDeepNesting")
-                .logContains(Messages.ModelValidatorImpl_NoNestedWithinNestedStages())
-                .go();
+    public void matrixStagesDeepNesting() throws Exception {
+        expectError("matrixStagesDeepNesting")
+            .logContains(Messages.ModelValidatorImpl_NoNestedWithinNestedStages())
+            .go();
     }
 
     @Issue("JENKINS-46809")
@@ -706,6 +822,27 @@ public class ValidatorTest extends AbstractModelDefTest {
         expectError("parallelStagesGroupsDeepNesting")
                 .logContains(Messages.ModelValidatorImpl_NoNestedWithinNestedStages())
                 .go();
+    }
+
+    @Test
+    public void matrixParallelStagesGroupsDeepNesting() throws Exception {
+        expectError("matrixParallelStagesGroupsDeepNesting")
+            .logContains(Messages.ModelValidatorImpl_NoNestedWithinNestedStages())
+            .go();
+    }
+
+    @Test
+    public void parallelMatrixStagesGroupsDeepNesting() throws Exception {
+        expectError("parallelMatrixStagesGroupsDeepNesting")
+            .logContains(Messages.ModelValidatorImpl_NoNestedWithinNestedStages())
+            .go();
+    }
+
+    @Test
+    public void matrixTopLevel() throws Exception {
+        expectError("matrixTopLevel")
+            .logContains(Messages.Parser_UndefinedSection("matrix"))
+            .go();
     }
 
     @Test
@@ -749,13 +886,13 @@ public class ValidatorTest extends AbstractModelDefTest {
         public static int count = 0;
 
         @Override
-        public String validateElement(@Nonnull ModelASTPostBuild postBuild, @CheckForNull FlowExecution execution) {
+        public String validateElement(@NonNull ModelASTPostBuild postBuild, @CheckForNull FlowExecution execution) {
             count++;
             return "validate " + count;
         }
 
         @Override
-        public String validateElement(@Nonnull ModelASTOption option, @CheckForNull FlowExecution execution) {
+        public String validateElement(@NonNull ModelASTOption option, @CheckForNull FlowExecution execution) {
             count++;
             return "validate option " + count;
         }
@@ -764,7 +901,7 @@ public class ValidatorTest extends AbstractModelDefTest {
     @TestExtension
     public static class RejectTestProperty extends DeclarativeValidatorContributor {
         @Override
-        public String validateElement(@Nonnull ModelASTOption option, @CheckForNull FlowExecution execution) {
+        public String validateElement(@NonNull ModelASTOption option, @CheckForNull FlowExecution execution) {
             if (option.getName() != null && option.getName().equals("testProperty")) {
                 return "testProperty is rejected";
             } else {
@@ -783,7 +920,7 @@ public class ValidatorTest extends AbstractModelDefTest {
         @Symbol("testProperty")
         public static class DescriptorImpl extends OptionalJobPropertyDescriptor {
             @Override
-            @Nonnull
+            @NonNull
             public String getDisplayName() {
                 return "Test job property to be rejected by a validator contributor.";
             }
@@ -808,6 +945,14 @@ public class ValidatorTest extends AbstractModelDefTest {
     public void multipleStageLevelSections() throws Exception {
         expectError("multipleStageLevelSections")
                 .logContains(Messages.Parser_MultipleOfSection("agent"))
+                .go();
+    }
+
+    @Issue ("JENKINS-51792")
+    @Test
+    public void multipleStepsSectionsInStage() throws Exception {
+        expectError("multipleStepsSectionsInStage")
+                .logContains(Messages.Parser_MultipleOfSection("steps"))
                 .go();
     }
 
@@ -935,7 +1080,7 @@ public class ValidatorTest extends AbstractModelDefTest {
     public static class RejectEchoStep extends DeclarativeValidatorContributor {
         @CheckForNull
         @Override
-        public String validateElement(@Nonnull ModelASTStep step, @CheckForNull FlowExecution execution) {
+        public String validateElement(@NonNull ModelASTStep step, @CheckForNull FlowExecution execution) {
             if (step.getName() != null && step.getName().equals("echo")) {
                 return "Echo is banned";
             }
@@ -980,4 +1125,14 @@ public class ValidatorTest extends AbstractModelDefTest {
                 .logContains(Messages.ModelParser_ExpectedStage())
                 .go();
     }
+
+
+    @Test
+    public void matrixStagesAndGroups() throws Exception {
+        expectError("matrixStagesAndGroups")
+                .logContains(Messages.ModelValidatorImpl_TwoOfStepsStagesParallel("foo"))
+                .go();
+    }
+
+
 }

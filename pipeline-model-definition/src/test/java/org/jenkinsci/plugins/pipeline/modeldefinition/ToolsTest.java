@@ -30,11 +30,9 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 import org.jvnet.hudson.test.Issue;
-import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.ToolInstallations;
 
 import static org.junit.Assert.assertNotNull;
-import static org.jvnet.hudson.test.ToolInstallations.configureDefaultMaven;
 
 /**
  * @author Andrew Bayer
@@ -46,7 +44,7 @@ public class ToolsTest extends AbstractModelDefTest {
     @BeforeClass
     public static void setUpAgent() throws Exception {
         s = j.createOnlineSlave();
-        s.setLabelString("some-label docker");
+        s.setLabelString("some-label");
     }
 
     @Test
@@ -59,7 +57,7 @@ public class ToolsTest extends AbstractModelDefTest {
     @Issue("JENKINS-44497")
     @Test
     public void envVarInTools() throws Exception {
-        expect("envVarInTools")
+        expect("environment/envVarInTools")
                 .logContains("[Pipeline] { (foo)", "Apache Maven 3.0.1")
                 .go();
     }
@@ -118,5 +116,17 @@ public class ToolsTest extends AbstractModelDefTest {
                         "M2_HOME: " + maven350.getHome(),
                         "JAVA_HOME: " + thisJdk.getHome())
                 .go();
+    }
+
+    @Issue("JENKINS-46809")
+    @Test
+    public void toolsWithOutsideVarAndFunc() throws Exception {
+        Maven.MavenInstallation maven301 = ToolInstallations.configureMaven3();
+
+        j.jenkins.getDescriptorByType(Maven.DescriptorImpl.class).setInstallations(maven301);
+
+        expect("toolsWithOutsideVarAndFunc")
+            .logContains("Apache Maven 3.0.1")
+            .go();
     }
 }

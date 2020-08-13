@@ -49,16 +49,30 @@ class Stage implements Serializable {
 
     Tools tools
 
+    /**
+     * Holds environment values for this cell, generated from the axes of a parent matrix directive.
+     * The values are guaranteed to be literals.
+     * They are always applied before any other context for each generated cell stage in a matrix
+     */
+    Environment matrixCellEnvironment
+
+    /**
+     * Holds environment values provided by the user.
+     * These are evaluated after entering an agent context (if any)
+     * Values may be non-literals such as GStrings.
+     */
     Environment environment
 
     StepsBlock steps
 
     Stages stages
 
-    List<Stage> parallelContent = []
-
     @Deprecated
-    transient Stages parallel
+    transient List<Stage> parallelContent
+
+    Parallel parallel
+
+    Matrix matrix
 
     boolean failFast
 
@@ -69,19 +83,21 @@ class Stage implements Serializable {
     @Deprecated
     Stage(String name, StepsBlock steps, Agent agent, PostStage post, StageConditionals when, Tools tools,
           Environment environment, Stages parallel, boolean failFast) {
-        this(name, steps, agent, post, when, tools, environment, failFast, null, null, parallel?.stages, null)
+        this(name, steps, agent, post, when, tools, environment, failFast, null, null,
+                (Stages) null, (Parallel) parallel != null ? new Parallel(parallel.stages) : null, null)
     }
 
     @Deprecated
     Stage(String name, StepsBlock steps, Agent agent, PostStage post, StageConditionals when, Tools tools,
           Environment environment, Stages parallel, boolean failFast, StageOptions options, StageInput input) {
-        this(name, steps, agent, post, when, tools, environment, failFast, options, input, parallel?.stages, null)
+        this(name, steps, agent, post, when, tools, environment, failFast, options, input,
+                (Stages) null, (Parallel) parallel != null ? new Parallel(parallel.stages) : null, null)
     }
 
     @Whitelisted
     Stage(String name, StepsBlock steps, Agent agent, PostStage post, StageConditionals when, Tools tools,
           Environment environment, boolean failFast, StageOptions options, StageInput input,
-          List<Stage> parallelContent, Stages stages) {
+          Stages stages, Parallel parallel, Environment matrixCellEnvironment) {
         this.name = name
         this.agent = agent
         this.post = post
@@ -93,19 +109,22 @@ class Stage implements Serializable {
         this.options = options
         this.input = input
         this.stages = stages
-        if (parallelContent != null) {
-            this.parallelContent.addAll(parallelContent)
-        }
+        this.parallel = parallel
+        this.matrixCellEnvironment = matrixCellEnvironment
     }
 
+
     protected Object readResolve() throws IOException {
-        if (this.parallel != null) {
-            if (this.parallelContent == null) {
-                this.parallelContent = []
+        if (this.parallelContent?.size() > 0) {
+            if (this.parallel == null) {
+                this.parallel = new Parallel()
             }
-            this.parallelContent.addAll(this.parallel.stages)
-            this.parallel = null
+            if (this.parallelContent?.size() > 0) {
+                this.stages.stages.addAll(this.parallelContent)
+            }
+            this.parallelContent = null
         }
+
         return this
     }
 
@@ -119,6 +138,21 @@ class Stage implements Serializable {
         if (environment != null) {
             environment.envResolver.setScript(script)
             return environment.envResolver.closureMap
+        } else {
+            return [:]
+        }
+    }
+
+    /**
+     * Helper method for translating the key/value pairs in the {@link Environment} into a list of "key=value" strings
+     * suitable for use with the withEnv step.
+     *
+     * @return a map of keys to closures.
+     */
+    Map<String,Closure> getMatrixCellEnvVars(CpsScript script) {
+        if (matrixCellEnvironment != null) {
+            matrixCellEnvironment.envResolver.setScript(script)
+            return matrixCellEnvironment.envResolver.closureMap
         } else {
             return [:]
         }

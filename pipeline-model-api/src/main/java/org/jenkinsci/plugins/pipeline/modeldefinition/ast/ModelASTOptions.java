@@ -1,19 +1,18 @@
 package org.jenkinsci.plugins.pipeline.modeldefinition.ast;
 
-import java.util.ArrayList;
-import java.util.List;
-import net.sf.json.JSONArray;
 import net.sf.json.JSONObject;
 import org.jenkinsci.plugins.pipeline.modeldefinition.validator.ModelValidator;
 
-import javax.annotation.Nonnull;
+import edu.umd.cs.findbugs.annotations.NonNull;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * A container for one or more {@link ModelASTOption}s
  *
  * @author Andrew Bayer
  */
-public final class ModelASTOptions extends ModelASTElement {
+public final class ModelASTOptions extends ModelASTElement implements ModelASTElementContainer {
     private List<ModelASTOption> options = new ArrayList<>();
     private boolean inStage = false;
 
@@ -22,38 +21,32 @@ public final class ModelASTOptions extends ModelASTElement {
     }
 
     @Override
+    @NonNull
     public JSONObject toJSON() {
-        final JSONArray a = new JSONArray();
-        for (ModelASTOption option : options) {
-            a.add(option.toJSON());
-        }
-        return new JSONObject().accumulate("options", a);
+        return toJSONObject("options", options);
     }
 
     @Override
-    public void validate(@Nonnull final ModelValidator validator) {
+    public void validate(@NonNull final ModelValidator validator) {
         validator.validateElement(this);
-        for (ModelASTOption option : options) {
-            option.validate(validator);
-        }
+        validate(validator, options);
     }
 
     @Override
+    @NonNull
     public String toGroovy() {
-        StringBuilder result = new StringBuilder("options {\n");
-        for (ModelASTOption option : options) {
-            result.append(option.toGroovy()).append("\n");
-        }
-        result.append("}\n");
-        return result.toString();
+        return toGroovyBlock("options", options);
     }
 
     @Override
     public void removeSourceLocation() {
         super.removeSourceLocation();
-        for (ModelASTOption option : options) {
-            option.removeSourceLocation();
-        }
+        removeSourceLocationsFrom(options);
+    }
+
+    @Override
+    public boolean isEmpty() {
+        return options.isEmpty();
     }
 
     public List<ModelASTOption> getOptions() {
